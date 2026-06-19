@@ -58,11 +58,9 @@ matches      list of (start, end) byte offsets for match rows
 
 `SearchLine` has a structured `repr`, an rg-style `str`, and `SearchLine.asdict()` returns row fields as a plain Python dict. `rg(..., paths=True)` returns unique matched paths, and `rg(..., count=True)` returns the total number of match spans. `paths` and `count` cannot both be set.
 
-`before_context`, `after_context`, and `context` match the shape of `rg -B`, `rg -A`, and `rg -C`. Files containing NUL bytes or invalid UTF-8 are skipped.
+`before_context`, `after_context`, and `context` are like `rg -B`, `rg -A`, and `rg -C`. Files containing NUL bytes or invalid UTF-8 are skipped.
 
 Search is case-sensitive by default, matching `rg`. Use `smart_case=True` for `rg --smart-case` behavior, or `case_sensitive=False` to force case-insensitive matching.
-
-`rg` and `rg_iter` check Python signals while waiting for search results, so notebook interrupts and `KeyboardInterrupt` cancel traversal cooperatively. Cancellation is prompt between files and while results are streaming; a single huge file that produces no callbacks may continue until that file scan returns.
 
 ## Benchmarks
 
