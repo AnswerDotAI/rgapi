@@ -1,5 +1,5 @@
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 
 use grep_matcher::Matcher;
@@ -7,7 +7,7 @@ use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::{
     BinaryDetection, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkError, SinkMatch,
 };
-use ignore::{Walk, WalkBuilder};
+use ignore::{DirEntry, WalkBuilder, WalkState};
 
 use crate::walk::{configure_walker, filter_dirs, normalize_root, rel_path, PathFilters};
 use crate::RgApiError;
@@ -61,7 +61,6 @@ pub struct RgOptions {
     pub max_filesize: Option<u64>,
     pub follow_links: bool,
     pub same_file_system: bool,
-    pub sort: bool,
     pub case_sensitive: Option<bool>,
     pub smart_case: bool,
     pub before_context: usize,
@@ -86,9 +85,8 @@ impl Default for RgOptions {
             max_filesize: None,
             follow_links: false,
             same_file_system: false,
-            sort: false,
             case_sensitive: None,
-            smart_case: true,
+            smart_case: false,
             before_context: 0,
             after_context: 0,
         }
@@ -96,12 +94,9 @@ impl Default for RgOptions {
 }
 
 pub fn rg(opts: &RgOptions) -> Result<Vec<SearchLine>, RgApiError> {
-    let mut out = Vec::new();
-    for line in rg_iter(opts)? {
-        out.push(line?);
-    }
-    Ok(out)
+    rg_iter(opts)?.collect()
 }
+
 pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
     let root = normalize_root(&opts.root)?;
     let filters = Arc::new(PathFilters::new(
@@ -113,66 +108,35 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
         opts.skip_dir_re.as_deref(),
     )?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case)?;
-    let walker = build_walker(&root, opts, filters.clone());
+    let opts = opts.clone();
+    let (tx, rx) = mpsc::channel();
+    let worker = std::thread::spawn(move || run_parallel_search(root, opts, filters, matcher, tx));
     Ok(RgIter {
-        root,
-        walker,
-        filters,
-        matcher,
-        before_context: opts.before_context,
-        after_context: opts.after_context,
-        pending: VecDeque::new(),
+        rx,
+        _worker: worker,
     })
 }
+
 pub struct RgIter {
-    root: PathBuf,
-    walker: Walk,
-    filters: Arc<PathFilters>,
-    matcher: RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-    pending: VecDeque<SearchLine>,
+    rx: Receiver<Result<SearchLine, RgApiError>>,
+    _worker: std::thread::JoinHandle<()>,
 }
+
 impl Iterator for RgIter {
     type Item = Result<SearchLine, RgApiError>;
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if let Some(line) = self.pending.pop_front() {
-                return Some(Ok(line));
-            }
-            let dent = match self.walker.next()? {
-                Ok(dent) => dent,
-                Err(err) => return Some(Err(RgApiError::new(err.to_string()))),
-            };
-            let path = dent.path();
-            if path == self.root.as_path() {
-                continue;
-            }
-            let Some(ft) = dent.file_type() else {
-                continue;
-            };
-            if !ft.is_file() {
-                continue;
-            }
-            let rel = rel_path(&self.root, path);
-            if !self.filters.path_allowed(&rel) {
-                continue;
-            }
-            match search_path(
-                path,
-                rel,
-                self.matcher.clone(),
-                self.before_context,
-                self.after_context,
-            ) {
-                Ok(lines) => self.pending.extend(lines),
-                Err(err) => return Some(Err(err)),
-            }
-        }
+        self.rx.recv().ok()
     }
 }
-fn build_walker(root: &Path, opts: &RgOptions, filters: Arc<PathFilters>) -> Walk {
-    let mut walker = WalkBuilder::new(root);
+
+fn run_parallel_search(
+    root: PathBuf,
+    opts: RgOptions,
+    filters: Arc<PathFilters>,
+    matcher: RegexMatcher,
+    tx: Sender<Result<SearchLine, RgApiError>>,
+) {
+    let mut walker = WalkBuilder::new(&root);
     configure_walker(
         &mut walker,
         opts.ignore,
@@ -182,10 +146,74 @@ fn build_walker(root: &Path, opts: &RgOptions, filters: Arc<PathFilters>) -> Wal
         opts.max_filesize,
         opts.follow_links,
         opts.same_file_system,
-        opts.sort,
     );
-    filter_dirs(&mut walker, root, filters);
-    walker.build()
+    filter_dirs(&mut walker, &root, filters.clone());
+    let before_context = opts.before_context;
+    let after_context = opts.after_context;
+    walker.build_parallel().run(|| {
+        let tx = tx.clone();
+        let root = root.clone();
+        let filters = filters.clone();
+        let matcher = matcher.clone();
+        let before_context = before_context;
+        let after_context = after_context;
+        Box::new(move |entry| {
+            search_entry(
+                entry,
+                &root,
+                &filters,
+                &matcher,
+                before_context,
+                after_context,
+                &tx,
+            )
+        })
+    });
+}
+
+fn search_entry(
+    entry: Result<DirEntry, ignore::Error>,
+    root: &Path,
+    filters: &PathFilters,
+    matcher: &RegexMatcher,
+    before_context: usize,
+    after_context: usize,
+    tx: &Sender<Result<SearchLine, RgApiError>>,
+) -> WalkState {
+    let dent = match entry {
+        Ok(dent) => dent,
+        Err(err) => return send_search_error(tx, RgApiError::new(err.to_string())),
+    };
+    let path = dent.path();
+    if path == root {
+        return WalkState::Continue;
+    }
+    let Some(ft) = dent.file_type() else {
+        return WalkState::Continue;
+    };
+    if !ft.is_file() {
+        return WalkState::Continue;
+    }
+    let rel = rel_path(root, path);
+    if !filters.path_allowed(&rel) {
+        return WalkState::Continue;
+    }
+    match search_path(path, rel, matcher.clone(), before_context, after_context) {
+        Ok(lines) => {
+            for line in lines {
+                if tx.send(Ok(line)).is_err() {
+                    return WalkState::Quit;
+                }
+            }
+            WalkState::Continue
+        }
+        Err(err) => send_search_error(tx, err),
+    }
+}
+
+fn send_search_error(tx: &Sender<Result<SearchLine, RgApiError>>, err: RgApiError) -> WalkState {
+    let _ = tx.send(Err(err));
+    WalkState::Quit
 }
 
 pub fn compile_regex(

@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
-use ignore::{DirEntry, WalkBuilder};
+use ignore::{DirEntry, WalkBuilder, WalkState};
 
 use crate::RgApiError;
 
@@ -25,7 +25,6 @@ pub struct FindOptions {
     pub max_filesize: Option<u64>,
     pub follow_links: bool,
     pub same_file_system: bool,
-    pub sort: bool,
     pub files: bool,
     pub dirs: bool,
 }
@@ -48,7 +47,6 @@ impl Default for FindOptions {
             max_filesize: None,
             follow_links: false,
             same_file_system: false,
-            sort: false,
             files: true,
             dirs: false,
         }
@@ -75,40 +73,72 @@ pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
         opts.max_filesize,
         opts.follow_links,
         opts.same_file_system,
-        opts.sort,
     );
     filter_dirs(&mut walker, &root, filters.clone());
-    let mut out = Vec::new();
-    for dent in walker.build() {
-        let dent = dent.map_err(|e| RgApiError::new(e.to_string()))?;
-        let path = dent.path();
-        if path == root {
-            continue;
-        }
-        let Some(ft) = dent.file_type() else {
-            continue;
-        };
-        if ft.is_file() && !opts.files {
-            continue;
-        }
-        if ft.is_dir() && !opts.dirs {
-            continue;
-        }
-        if !ft.is_file() && !ft.is_dir() {
-            continue;
-        }
-        let rel = rel_path(&root, path);
-        if let Some(pat) = &opts.pattern {
-            if !rel.contains(pat) {
-                continue;
+    let (tx, rx) = mpsc::channel();
+    let pattern = opts.pattern.clone();
+    let files = opts.files;
+    let dirs = opts.dirs;
+    walker.build_parallel().run(|| {
+        let tx = tx.clone();
+        let root = root.clone();
+        let filters = filters.clone();
+        let pattern = pattern.clone();
+        Box::new(move |entry| {
+            match find_entry(entry, &root, &filters, pattern.as_deref(), files, dirs) {
+                Ok(Some(path)) => {
+                    if tx.send(Ok(path)).is_err() {
+                        return WalkState::Quit;
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    let _ = tx.send(Err(err));
+                    return WalkState::Quit;
+                }
             }
-        }
-        if !filters.path_allowed(&rel) {
-            continue;
-        }
-        out.push(rel);
+            WalkState::Continue
+        })
+    });
+    drop(tx);
+    rx.into_iter().collect()
+}
+
+fn find_entry(
+    entry: Result<DirEntry, ignore::Error>,
+    root: &Path,
+    filters: &PathFilters,
+    pattern: Option<&str>,
+    files: bool,
+    dirs: bool,
+) -> Result<Option<String>, RgApiError> {
+    let dent = entry.map_err(|e| RgApiError::new(e.to_string()))?;
+    let path = dent.path();
+    if path == root {
+        return Ok(None);
     }
-    Ok(out)
+    let Some(ft) = dent.file_type() else {
+        return Ok(None);
+    };
+    if ft.is_file() && !files {
+        return Ok(None);
+    }
+    if ft.is_dir() && !dirs {
+        return Ok(None);
+    }
+    if !ft.is_file() && !ft.is_dir() {
+        return Ok(None);
+    }
+    let rel = rel_path(root, path);
+    if let Some(pat) = pattern {
+        if !rel.contains(pat) {
+            return Ok(None);
+        }
+    }
+    if !filters.path_allowed(&rel) {
+        return Ok(None);
+    }
+    Ok(Some(rel))
 }
 
 pub(crate) fn normalize_root(path: &Path) -> Result<PathBuf, RgApiError> {
@@ -138,7 +168,6 @@ pub(crate) fn configure_walker(
     max_filesize: Option<u64>,
     follow_links: bool,
     same_file_system: bool,
-    sort: bool,
 ) {
     walker.standard_filters(ignore);
     walker.hidden(!hidden);
@@ -148,9 +177,6 @@ pub(crate) fn configure_walker(
     walker.max_filesize(max_filesize);
     walker.follow_links(follow_links);
     walker.same_file_system(same_file_system);
-    if sort {
-        walker.sort_by_file_path(|a, b| a.cmp(b));
-    }
 }
 
 pub(crate) fn filter_dirs(walker: &mut WalkBuilder, root: &Path, filters: Arc<PathFilters>) {

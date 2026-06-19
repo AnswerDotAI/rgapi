@@ -61,7 +61,7 @@ impl SearchLinePy {
         Ok(())
     }
 }
-#[pyclass(name = "RgIter")]
+#[pyclass(name = "RgIter", unsendable)]
 struct RgIterPy {
     inner: RgIter,
 }
@@ -107,7 +107,7 @@ struct RegexPy {
 #[pymethods]
 impl RegexPy {
     #[new]
-    #[pyo3(signature = (pattern, case_sensitive=None, smart_case=true))]
+    #[pyo3(signature = (pattern, case_sensitive=None, smart_case=false))]
     fn new(pattern: String, case_sensitive: Option<bool>, smart_case: bool) -> PyResult<Self> {
         compile_regex_py(pattern, case_sensitive, smart_case)
     }
@@ -127,8 +127,8 @@ impl RegexPy {
             let value = if case_sensitive { "True" } else { "False" };
             args.push(format!("case_sensitive={value}"));
         }
-        if !self.smart_case {
-            args.push("smart_case=False".to_string());
+        if self.smart_case {
+            args.push("smart_case=True".to_string());
         }
         format!("Regex({})", args.join(", "))
     }
@@ -160,7 +160,7 @@ fn compile_regex_py(
     })
 }
 #[pyfunction(name = "compile")]
-#[pyo3(signature = (pattern, case_sensitive=None, smart_case=true))]
+#[pyo3(signature = (pattern, case_sensitive=None, smart_case=false))]
 fn compile_py(
     pattern: String,
     case_sensitive: Option<bool>,
@@ -169,7 +169,7 @@ fn compile_py(
     compile_regex_py(pattern, case_sensitive, smart_case)
 }
 #[pyfunction(name = "walk")]
-#[pyo3(signature = (root=".", hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, sort=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
+#[pyo3(signature = (root=".", hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
 fn walk_py(
     root: &str,
     hidden: bool,
@@ -179,7 +179,6 @@ fn walk_py(
     max_filesize: Option<u64>,
     follow_links: bool,
     same_file_system: bool,
-    sort: bool,
     path_re: Option<String>,
     skip_path_re: Option<String>,
     skip_dir: Option<Vec<String>>,
@@ -203,7 +202,6 @@ fn walk_py(
         max_filesize,
         follow_links,
         same_file_system,
-        sort,
         files,
         dirs,
     };
@@ -211,7 +209,7 @@ fn walk_py(
 }
 
 #[pyfunction(name = "find")]
-#[pyo3(signature = (root=".", pattern=None, include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, sort=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
+#[pyo3(signature = (root=".", pattern=None, include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
 fn find_py(
     root: &str,
     pattern: Option<String>,
@@ -224,7 +222,6 @@ fn find_py(
     max_filesize: Option<u64>,
     follow_links: bool,
     same_file_system: bool,
-    sort: bool,
     path_re: Option<String>,
     skip_path_re: Option<String>,
     skip_dir: Option<Vec<String>>,
@@ -248,7 +245,6 @@ fn find_py(
         max_filesize,
         follow_links,
         same_file_system,
-        sort,
         files,
         dirs,
     };
@@ -296,7 +292,7 @@ fn search_path_py(
 }
 
 #[pyfunction(name = "rg")]
-#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, sort=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=true, before_context=0, after_context=0))]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0))]
 fn rg_py(
     pattern: String,
     root: &str,
@@ -309,7 +305,6 @@ fn rg_py(
     max_filesize: Option<u64>,
     follow_links: bool,
     same_file_system: bool,
-    sort: bool,
     path_re: Option<String>,
     skip_path_re: Option<String>,
     skip_dir: Option<Vec<String>>,
@@ -335,7 +330,6 @@ fn rg_py(
         max_filesize,
         follow_links,
         same_file_system,
-        sort,
         case_sensitive,
         smart_case,
         before_context,
@@ -346,7 +340,7 @@ fn rg_py(
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 #[pyfunction(name = "rg_iter")]
-#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, sort=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=true, before_context=0, after_context=0))]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0))]
 fn rg_iter_py(
     pattern: String,
     root: &str,
@@ -359,7 +353,6 @@ fn rg_iter_py(
     max_filesize: Option<u64>,
     follow_links: bool,
     same_file_system: bool,
-    sort: bool,
     path_re: Option<String>,
     skip_path_re: Option<String>,
     skip_dir: Option<Vec<String>>,
@@ -385,7 +378,6 @@ fn rg_iter_py(
         max_filesize,
         follow_links,
         same_file_system,
-        sort,
         case_sensitive,
         smart_case,
         before_context,

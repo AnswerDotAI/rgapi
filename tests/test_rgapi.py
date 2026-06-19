@@ -32,7 +32,7 @@ def test_fd_is_relative_and_respects_ignore_hidden_and_globs(tmp_path):
     assert set(walk(str(tmp_path), files=True, dirs=False)) == found
 
 
-def test_path_filters_prune_dirs_follow_links_and_sort(tmp_path):
+def test_path_filters_prune_dirs_and_follow_links(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("TODO src\n")
     (tmp_path / "src" / "note.txt").write_text("TODO text\n")
@@ -41,17 +41,17 @@ def test_path_filters_prune_dirs_follow_links_and_sort(tmp_path):
     (tmp_path / "b.py").write_text("TODO b\n")
     (tmp_path / "a.py").write_text("TODO a\n")
 
-    assert fd(str(tmp_path), path_re=r"\.py$", sort=True) == ["a.py", "b.py", "skip/app.py", "src/app.py"]
+    assert set(fd(str(tmp_path), path_re=r"\.py$")) == {"a.py", "b.py", "skip/app.py", "src/app.py"}
     assert fd(str(tmp_path), path_re=r"src/.*\.py$") == ["src/app.py"]
-    assert fd(str(tmp_path), path_re=r"\.py$", skip_path_re=r"(^|/)b\.py$", skip_dir="skip", sort=True) == ["a.py", "src/app.py"]
-    assert walk(str(tmp_path), path_re=r"\.txt$", sort=True) == ["src/note.txt"]
-    assert [r.path for r in rg("TODO", str(tmp_path), path_re=r"\.py$", skip_dir_re=r"^skip$", sort=True)] == ["a.py", "b.py", "src/app.py"]
+    assert set(fd(str(tmp_path), path_re=r"\.py$", skip_path_re=r"(^|/)b\.py$", skip_dir="skip")) == {"a.py", "src/app.py"}
+    assert walk(str(tmp_path), path_re=r"\.txt$") == ["src/note.txt"]
+    assert {r.path for r in rg("TODO", str(tmp_path), path_re=r"\.py$", skip_dir_re=r"^skip$")} == {"a.py", "b.py", "src/app.py"}
 
     link = tmp_path / "linked"
     try: link.symlink_to(tmp_path / "src", target_is_directory=True)
     except OSError: return
     assert fd(str(tmp_path), path_re=r"linked/.*\.py$", follow_links=False) == []
-    assert fd(str(tmp_path), path_re=r"linked/.*\.py$", follow_links=True, sort=True) == ["linked/app.py"]
+    assert fd(str(tmp_path), path_re=r"linked/.*\.py$", follow_links=True) == ["linked/app.py"]
 
 def test_depth_size_and_filesystem_options(tmp_path):
     (tmp_path / "top.txt").write_text("TODO\n")
@@ -60,11 +60,11 @@ def test_depth_size_and_filesystem_options(tmp_path):
     (sub / "small.txt").write_text("TODO\n")
     (sub / "large.txt").write_text("TODO large\n")
 
-    assert fd(str(tmp_path), max_depth=1, sort=True) == ["top.txt"]
-    assert fd(str(tmp_path), min_depth=2, sort=True) == ["sub/large.txt", "sub/small.txt"]
-    assert fd(str(tmp_path), max_filesize=5, sort=True) == ["sub/small.txt", "top.txt"]
-    assert fd(str(tmp_path), same_file_system=True, sort=True) == ["sub/large.txt", "sub/small.txt", "top.txt"]
-    assert [r.path for r in rg("TODO", str(tmp_path), min_depth=2, max_filesize=5, sort=True)] == ["sub/small.txt"]
+    assert fd(str(tmp_path), max_depth=1) == ["top.txt"]
+    assert set(fd(str(tmp_path), min_depth=2)) == {"sub/large.txt", "sub/small.txt"}
+    assert set(fd(str(tmp_path), max_filesize=5)) == {"sub/small.txt", "top.txt"}
+    assert set(fd(str(tmp_path), same_file_system=True)) == {"sub/large.txt", "sub/small.txt", "top.txt"}
+    assert [r.path for r in rg("TODO", str(tmp_path), min_depth=2, max_filesize=5)] == ["sub/small.txt"]
 
 
 def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
@@ -105,23 +105,25 @@ def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
 def test_direct_regex_and_search_apis(tmp_path):
     make_tree(tmp_path)
     matcher = compile("todo")
+    smart_matcher = compile("todo", smart_case=True)
     assert isinstance(matcher, Regex)
-    assert matcher.is_match("TODO")
-    assert matcher.finditer("todo TODO") == [(0, 4), (5, 9)]
-    assert not compile("todo", case_sensitive=True).is_match("TODO")
+    assert not matcher.is_match("TODO")
+    assert smart_matcher.is_match("TODO")
+    assert matcher.finditer("todo TODO") == [(0, 4)]
+    assert smart_matcher.finditer("todo TODO") == [(0, 4), (5, 9)]
     assert repr(matcher) == 'Regex("todo")'
     assert str(matcher) == repr(matcher)
     assert repr(compile("todo", case_sensitive=True)) == 'Regex("todo", case_sensitive=True)'
-    assert repr(compile("todo", smart_case=False)) == 'Regex("todo", smart_case=False)'
+    assert repr(smart_matcher) == 'Regex("todo", smart_case=True)'
     assert compile("todo", case_sensitive=True).case_sensitive is True
-    assert compile("todo", smart_case=False).smart_case is False
-    text_res = search_text(matcher, "zero\nTODO here\none\n", path="memory.txt", context=1)
+    assert smart_matcher.smart_case is True
+    text_res = search_text(smart_matcher, "zero\nTODO here\none\n", path="memory.txt", context=1)
     assert isinstance(text_res, SearchResults)
     assert [(r.kind, r.path, r.line_number, r.line) for r in text_res] == [
         ("before", "memory.txt", 1, "zero"),
         ("match", "memory.txt", 2, "TODO here"),
         ("after", "memory.txt", 3, "one")]
-    path_res = search_path(matcher, str(tmp_path / "src" / "app.py"), display_path="display.py")
+    path_res = search_path(smart_matcher, str(tmp_path / "src" / "app.py"), display_path="display.py")
     assert isinstance(path_res, SearchResults)
     assert [(r.kind, r.path, r.line_number, r.line, r.matches) for r in path_res] == [
         ("match", "display.py", 2, "TODO here", [(0, 4)])]
