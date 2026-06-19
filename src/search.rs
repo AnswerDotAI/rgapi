@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, Receiver, RecvTimeoutError, Sender},
+    Arc,
+};
+use std::time::Duration;
 
 use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
@@ -109,23 +113,47 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
     )?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case)?;
     let opts = opts.clone();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_cancel = cancel.clone();
     let (tx, rx) = mpsc::channel();
-    let worker = std::thread::spawn(move || run_parallel_search(root, opts, filters, matcher, tx));
+    let worker = std::thread::spawn(move || {
+        run_parallel_search(root, opts, filters, matcher, tx, worker_cancel)
+    });
     Ok(RgIter {
         rx,
+        cancel,
         _worker: worker,
     })
 }
 
 pub struct RgIter {
     rx: Receiver<Result<SearchLine, RgApiError>>,
+    cancel: Arc<AtomicBool>,
     _worker: std::thread::JoinHandle<()>,
+}
+
+impl RgIter {
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+
+    pub fn next_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Result<SearchLine, RgApiError>, RecvTimeoutError> {
+        self.rx.recv_timeout(timeout)
+    }
 }
 
 impl Iterator for RgIter {
     type Item = Result<SearchLine, RgApiError>;
     fn next(&mut self) -> Option<Self::Item> {
         self.rx.recv().ok()
+    }
+}
+impl Drop for RgIter {
+    fn drop(&mut self) {
+        self.cancel();
     }
 }
 
@@ -135,6 +163,7 @@ fn run_parallel_search(
     filters: Arc<PathFilters>,
     matcher: RegexMatcher,
     tx: Sender<Result<SearchLine, RgApiError>>,
+    cancel: Arc<AtomicBool>,
 ) {
     let mut walker = WalkBuilder::new(&root);
     configure_walker(
@@ -157,6 +186,7 @@ fn run_parallel_search(
         let matcher = matcher.clone();
         let before_context = before_context;
         let after_context = after_context;
+        let cancel = cancel.clone();
         Box::new(move |entry| {
             search_entry(
                 entry,
@@ -166,6 +196,7 @@ fn run_parallel_search(
                 before_context,
                 after_context,
                 &tx,
+                &cancel,
             )
         })
     });
@@ -179,7 +210,11 @@ fn search_entry(
     before_context: usize,
     after_context: usize,
     tx: &Sender<Result<SearchLine, RgApiError>>,
+    cancel: &Arc<AtomicBool>,
 ) -> WalkState {
+    if is_cancelled(cancel) {
+        return WalkState::Quit;
+    }
     let dent = match entry {
         Ok(dent) => dent,
         Err(err) => return send_search_error(tx, RgApiError::new(err.to_string())),
@@ -198,10 +233,20 @@ fn search_entry(
     if !filters.path_allowed(&rel) {
         return WalkState::Continue;
     }
-    match search_path(path, rel, matcher.clone(), before_context, after_context) {
+    match search_path_cancelable(
+        path,
+        rel,
+        matcher.clone(),
+        before_context,
+        after_context,
+        Some(cancel.clone()),
+    ) {
         Ok(lines) => {
+            if is_cancelled(cancel) {
+                return WalkState::Quit;
+            }
             for line in lines {
-                if tx.send(Ok(line)).is_err() {
+                if is_cancelled(cancel) || tx.send(Ok(line)).is_err() {
                     return WalkState::Quit;
                 }
             }
@@ -209,6 +254,10 @@ fn search_entry(
         }
         Err(err) => send_search_error(tx, err),
     }
+}
+
+fn is_cancelled(cancel: &Arc<AtomicBool>) -> bool {
+    cancel.load(Ordering::Relaxed)
 }
 
 fn send_search_error(tx: &Sender<Result<SearchLine, RgApiError>>, err: RgApiError) -> WalkState {
@@ -251,6 +300,24 @@ pub fn search_path(
     before_context: usize,
     after_context: usize,
 ) -> Result<Vec<SearchLine>, RgApiError> {
+    search_path_cancelable(
+        path,
+        display_path,
+        matcher,
+        before_context,
+        after_context,
+        None,
+    )
+}
+
+fn search_path_cancelable(
+    path: &Path,
+    display_path: String,
+    matcher: RegexMatcher,
+    before_context: usize,
+    after_context: usize,
+    cancel: Option<Arc<AtomicBool>>,
+) -> Result<Vec<SearchLine>, RgApiError> {
     let mut builder = SearcherBuilder::new();
     builder
         .line_number(true)
@@ -264,6 +331,7 @@ pub fn search_path(
         path: display_path,
         matcher,
         lines: &mut out,
+        cancel,
     };
     match searcher.search_path(search_matcher, path, sink) {
         Ok(()) => Ok(out),
@@ -305,6 +373,7 @@ fn search_bytes(
         path: display_path,
         matcher,
         lines: &mut out,
+        cancel: None,
     };
     searcher
         .search_slice(search_matcher, bytes, sink)
@@ -316,6 +385,15 @@ struct CollectSink<'a> {
     path: String,
     matcher: RegexMatcher,
     lines: &'a mut Vec<SearchLine>,
+    cancel: Option<Arc<AtomicBool>>,
+}
+impl CollectSink<'_> {
+    fn cancelled(&self) -> bool {
+        match &self.cancel {
+            Some(cancel) => is_cancelled(cancel),
+            None => false,
+        }
+    }
 }
 
 impl Sink for CollectSink<'_> {
@@ -326,6 +404,9 @@ impl Sink for CollectSink<'_> {
         _searcher: &grep_searcher::Searcher,
         mat: &SinkMatch<'_>,
     ) -> Result<bool, Self::Error> {
+        if self.cancelled() {
+            return Ok(false);
+        }
         let line = bytes_to_line(mat.bytes())?;
         let spans = spans_for(&self.matcher, mat.bytes())?;
         self.lines.push(SearchLine {
@@ -335,7 +416,7 @@ impl Sink for CollectSink<'_> {
             line,
             matches: spans,
         });
-        Ok(true)
+        Ok(!self.cancelled())
     }
 
     fn context(
@@ -343,6 +424,9 @@ impl Sink for CollectSink<'_> {
         _searcher: &grep_searcher::Searcher,
         ctx: &SinkContext<'_>,
     ) -> Result<bool, Self::Error> {
+        if self.cancelled() {
+            return Ok(false);
+        }
         let kind = match ctx.kind() {
             SinkContextKind::Before => SearchKind::Before,
             SinkContextKind::After => SearchKind::After,
@@ -355,7 +439,7 @@ impl Sink for CollectSink<'_> {
             line: bytes_to_line(ctx.bytes())?,
             matches: Vec::new(),
         });
-        Ok(true)
+        Ok(!self.cancelled())
     }
     fn binary_data(
         &mut self,

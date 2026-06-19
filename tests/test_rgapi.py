@@ -1,3 +1,7 @@
+import _thread, threading
+
+import pytest
+
 from rgapi import Regex, SearchResults, compile, fd, rg, rg_iter, search_path, search_text, walk
 
 
@@ -101,6 +105,15 @@ def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
     assert repr(stream) == "RgIter(SearchLine stream)"
     assert str(stream) == repr(stream)
 
+
+def test_rg_keyboard_interrupt_cancels(tmp_path):
+    (tmp_path / "big.txt").write_text("alpha beta gamma\n" * 1_000_000)
+    timer = threading.Timer(0.001, _thread.interrupt_main)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            timer.start()
+            rg("needle_that_is_not_present", str(tmp_path))
+    finally: timer.cancel()
 
 def test_direct_regex_and_search_apis(tmp_path):
     make_tree(tmp_path)

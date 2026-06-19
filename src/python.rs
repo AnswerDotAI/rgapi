@@ -1,5 +1,7 @@
 use grep_matcher::Matcher;
 use std::path::PathBuf;
+use std::sync::mpsc::RecvTimeoutError;
+use std::time::Duration;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -7,7 +9,7 @@ use pyo3::types::{PyAny, PyDict};
 
 use crate::search::spans_for;
 use crate::{
-    compile_regex, find, rg, rg_iter as rg_iter_core, search_path as search_path_core,
+    compile_regex, find, rg_iter as rg_iter_core, search_path as search_path_core,
     search_text as search_text_core, FindOptions, RgIter, RgOptions, SearchLine,
 };
 
@@ -70,12 +72,11 @@ impl RgIterPy {
     fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<SearchLinePy>> {
-        match slf.inner.next() {
-            Some(Ok(line)) => Ok(Some(SearchLinePy::from(line))),
-            Some(Err(err)) => Err(PyValueError::new_err(err.to_string())),
-            None => Ok(None),
-        }
+    fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Option<SearchLinePy>> {
+        next_rg_line_py(py, &mut slf.inner)
+    }
+    fn cancel(&self) {
+        self.inner.cancel();
     }
     fn __repr__(&self) -> String {
         "RgIter(SearchLine stream)".to_string()
@@ -92,6 +93,35 @@ impl RgIterPy {
         p.call_method1("text", (text,))?;
         Ok(())
     }
+}
+fn check_signals_or_cancel(py: Python<'_>, iter: &RgIter) -> PyResult<()> {
+    if let Err(err) = py.check_signals() {
+        iter.cancel();
+        return Err(err);
+    }
+    Ok(())
+}
+
+fn next_rg_line_py(py: Python<'_>, iter: &mut RgIter) -> PyResult<Option<SearchLinePy>> {
+    loop {
+        check_signals_or_cancel(py, iter)?;
+        let res = py.allow_threads(|| iter.next_timeout(Duration::from_millis(50)));
+        check_signals_or_cancel(py, iter)?;
+        match res {
+            Ok(Ok(line)) => return Ok(Some(SearchLinePy::from(line))),
+            Ok(Err(err)) => return Err(PyValueError::new_err(err.to_string())),
+            Err(RecvTimeoutError::Disconnected) => return Ok(None),
+            Err(RecvTimeoutError::Timeout) => continue,
+        }
+    }
+}
+
+fn collect_rg_py(py: Python<'_>, mut iter: RgIter) -> PyResult<Vec<SearchLinePy>> {
+    let mut res = Vec::new();
+    while let Some(line) = next_rg_line_py(py, &mut iter)? {
+        res.push(line);
+    }
+    Ok(res)
 }
 #[pyclass(name = "Regex")]
 #[derive(Clone)]
@@ -294,6 +324,7 @@ fn search_path_py(
 #[pyfunction(name = "rg")]
 #[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0))]
 fn rg_py(
+    py: Python<'_>,
     pattern: String,
     root: &str,
     include: Option<Vec<String>>,
@@ -335,9 +366,8 @@ fn rg_py(
         before_context,
         after_context,
     };
-    rg(&opts)
-        .map(|lines| lines.into_iter().map(SearchLinePy::from).collect())
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+    let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    collect_rg_py(py, iter)
 }
 #[pyfunction(name = "rg_iter")]
 #[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0))]

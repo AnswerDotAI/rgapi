@@ -62,6 +62,8 @@ matches      list of (start, end) byte offsets for match rows
 
 Search is case-sensitive by default, matching `rg`. Use `smart_case=True` for `rg --smart-case` behavior, or `case_sensitive=False` to force case-insensitive matching.
 
+`rg` and `rg_iter` check Python signals while waiting for search results, so notebook interrupts and `KeyboardInterrupt` cancel traversal cooperatively. Cancellation is prompt between files and while results are streaming; a single huge file that produces no callbacks may continue until that file scan returns.
+
 ## Benchmarks
 
 `tools/bench.py` compares the `rg` CLI with in-process `rgapi`. Run it against a release build. One run on this machine, using best time from seven repeats:
