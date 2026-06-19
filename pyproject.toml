@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "rgapi"
-version = "0.1.1"
+version = "0.1.2"
 description = "Python API for ripgrep-style file walking and searching"
 license = {text = "MIT OR Apache-2.0"}
 requires-python = ">=3.10"
