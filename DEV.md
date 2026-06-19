@@ -25,6 +25,10 @@ pytest -q
 
 Run `cargo test` for Rust unit tests. Run `chkstyle` after Python edits once tests pass.
 
+## Release
+
+Release plumbing mirrors exhash. `tools/bump.sh` bumps the patch version in `pyproject.toml` and `Cargo.toml`; `tools/bump2.sh` bumps the minor version; `tools/release.sh` tags the current version and pushes `main` plus tags. The GitHub workflow builds wheels for Python 3.10-3.13 on Linux and macOS and publishes artifacts to GitHub Releases and PyPI when a `v*` tag is pushed.
+
 ## Design notes
 
 Paths in `fd`, `walk`, `rg`, and `rg_iter` results are relative to the requested root and use `/` separators. Traversal uses `ignore::WalkParallel`, so result order is not part of the API contract. Search results are structured rows; collected result lists use rg-style `str()` and notebook display. Path regexes filter returned/searched paths; `skip_dir` and `skip_dir_re` prune traversal through `ignore::WalkBuilder::filter_entry`. Depth, size, symlink, filesystem, hidden, and ignore options are direct `ignore::WalkBuilder` settings. `rg_iter` exposes the same parallel search stream that `rg` collects by default; `paths=True` and `count=True` consume that stream with different reducers. Binary files and invalid UTF-8 are skipped for now.
