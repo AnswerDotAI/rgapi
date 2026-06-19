@@ -1,0 +1,25 @@
+[package]
+name = "rgapi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Python API for ripgrep-style file walking and searching"
+repository = "https://github.com/AnswerDotAI/rgapi"
+homepage = "https://github.com/AnswerDotAI/rgapi"
+documentation = "https://github.com/AnswerDotAI/rgapi"
+
+[lib]
+name = "rgapi"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+globset = "0.4.18"
+grep-matcher = "0.1.8"
+grep-regex = "0.1.14"
+grep-searcher = "0.1.16"
+ignore = "0.4.26"
+pyo3 = { version = "0.23", optional = true }
+
+[features]
+extension-module = ["pyo3", "pyo3/extension-module"]
+pyo3 = ["dep:pyo3"]

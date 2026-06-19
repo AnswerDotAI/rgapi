@@ -1,0 +1,26 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "rgapi"
+version = "0.1.0"
+description = "Python API for ripgrep-style file walking and searching"
+license = {text = "MIT OR Apache-2.0"}
+requires-python = ">=3.10"
+readme = "README.md"
+authors = [{name = "Jeremy Howard", email = "j@fast.ai"}]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+
+[project.urls]
+Homepage = "https://github.com/AnswerDotAI/rgapi"
+Repository = "https://github.com/AnswerDotAI/rgapi"
+Issues = "https://github.com/AnswerDotAI/rgapi/issues"
+
+[tool.maturin]
+features = ["extension-module"]
+python-source = "python"
+module-name = "rgapi._core"
