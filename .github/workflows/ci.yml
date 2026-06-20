@@ -26,7 +26,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: tools/build.sh release
+      - run: pip install fastship
+      - run: ship-rs-prep --release
       - uses: PyO3/maturin-action@v1
         with:
           command: build

@@ -35,6 +35,21 @@ def test_fd_is_relative_and_respects_ignore_hidden_and_globs(tmp_path):
     assert set(fd(str(tmp_path), exclude="*.py")) == {"bad.txt", "bin.dat"}
     assert set(walk(str(tmp_path), files=True, dirs=False)) == found
 
+def test_pathlike_arguments_and_expanduser(tmp_path, monkeypatch):
+    make_tree(tmp_path)
+    assert "src/app.py" in fd(tmp_path)
+    assert walk(tmp_path, path_re=r"\.py$") == ["src/app.py"]
+    assert [r.path for r in rg("TODO", tmp_path, include="*.py")] == ["src/app.py"]
+    assert list(rg_iter("TODO", tmp_path, include="*.py")) == rg("TODO", tmp_path, include="*.py")
+    matcher = compile("TODO")
+    text_label = tmp_path / "memory.txt"
+    assert search_text(matcher, "TODO\n", path=text_label)[0].path == str(text_label)
+    display = tmp_path / "display.py"
+    assert search_path(matcher, tmp_path / "src" / "app.py", display_path=display)[0].path == str(display)
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert fd("~", glob="*.py") == ["src/app.py"]
+
 
 def test_path_filters_prune_dirs_and_follow_links(tmp_path):
     (tmp_path / "src").mkdir()

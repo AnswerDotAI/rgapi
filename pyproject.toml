@@ -24,3 +24,9 @@ Issues = "https://github.com/AnswerDotAI/rgapi/issues"
 features = ["extension-module"]
 python-source = "python"
 module-name = "rgapi._core"
+
+[tool.fastship]
+branch = "main"
+
+[tool.fastship.rs]
+bins = []
