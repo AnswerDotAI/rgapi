@@ -17,17 +17,23 @@ The public Python API lives in `python/rgapi/__init__.py`. The extension module 
 ## Commands
 
 ```bash
-cargo fmt --check
-cargo check
-maturin develop
-pytest -q
+ship-rs-test
 ```
 
-Run `cargo test` for Rust unit tests. Run `chkstyle` after Python edits once tests pass.
+Run `cargo fmt --check` and `cargo check` for Rust-only edits. Run `chkstyle` after Python edits once tests pass.
 
 ## Release
 
-Release plumbing mirrors exhash. `tools/bump.sh` bumps the patch version in `pyproject.toml` and `Cargo.toml`; `tools/bump2.sh` bumps the minor version; `tools/release.sh` tags the current version and pushes `main` plus tags. The GitHub workflow builds wheels for Python 3.10-3.13 on Linux and macOS and publishes artifacts to GitHub Releases and PyPI when a `v*` tag is pushed.
+The canonical version lives in `Cargo.toml`. `pyproject.toml` gets the Python package version from Cargo via `dynamic = ["version"]`.
+
+Release flow is: release first, then bump.
+
+1. Run `ship-rs-test`.
+2. Confirm the release version in `Cargo.toml` (`[package].version`).
+3. Run `ship-rs-release`.
+4. After pushing the release tag, run `ship-rs-bump`, commit the `Cargo.toml` version bump, and push to `main` without a tag.
+
+The GitHub workflow builds wheels for Python 3.10-3.13 on Linux and macOS and publishes artifacts to GitHub Releases and PyPI when a `v*` tag is pushed.
 
 ## Design notes
 

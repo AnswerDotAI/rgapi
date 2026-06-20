@@ -13,7 +13,7 @@ use crate::{
     search_text as search_text_core, FindOptions, RgIter, RgOptions, SearchLine,
 };
 
-#[pyclass(name = "SearchLine", eq)]
+#[pyclass(name = "SearchLine", eq, skip_from_py_object)]
 #[derive(Clone, PartialEq)]
 struct SearchLinePy {
     #[pyo3(get)]
@@ -105,7 +105,7 @@ fn check_signals_or_cancel(py: Python<'_>, iter: &RgIter) -> PyResult<()> {
 fn next_rg_line_py(py: Python<'_>, iter: &mut RgIter) -> PyResult<Option<SearchLinePy>> {
     loop {
         check_signals_or_cancel(py, iter)?;
-        let res = py.allow_threads(|| iter.next_timeout(Duration::from_millis(50)));
+        let res = py.detach(|| iter.next_timeout(Duration::from_millis(50)));
         check_signals_or_cancel(py, iter)?;
         match res {
             Ok(Ok(line)) => return Ok(Some(SearchLinePy::from(line))),
@@ -123,7 +123,7 @@ fn collect_rg_py(py: Python<'_>, mut iter: RgIter) -> PyResult<Vec<SearchLinePy>
     }
     Ok(res)
 }
-#[pyclass(name = "Regex")]
+#[pyclass(name = "Regex", skip_from_py_object)]
 #[derive(Clone)]
 struct RegexPy {
     #[pyo3(get)]
