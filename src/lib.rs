@@ -3,7 +3,6 @@
 mod search;
 mod walk;
 
-#[cfg(feature = "pyo3")]
 mod python;
 
 pub use search::{

@@ -121,6 +121,14 @@ def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
     assert str(stream) == repr(stream)
 
 
+def test_search_path_skips_binary_and_invalid_utf8(tmp_path):
+    (tmp_path / "bin.dat").write_bytes(b"TODO before\n\0TODO after\n")
+    (tmp_path / "bad.txt").write_bytes(b"TODO\xff\n")
+    matcher = compile("TODO")
+    assert search_path(matcher, tmp_path / "bin.dat") == []
+    assert search_path(matcher, tmp_path / "bad.txt") == []
+
+
 def test_rg_keyboard_interrupt_cancels(tmp_path):
     (tmp_path / "big.txt").write_text("alpha beta gamma\n" * 1_000_000)
     timer = threading.Timer(0.001, _thread.interrupt_main)
