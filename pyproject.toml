@@ -15,6 +15,9 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
 ]
 
+[project.optional-dependencies]
+dev = ["fastship>=0.0.12", "maturin>=1.0,<2.0", "pytest"]
+
 [project.urls]
 Homepage = "https://github.com/AnswerDotAI/rgapi"
 Repository = "https://github.com/AnswerDotAI/rgapi"
@@ -27,6 +30,3 @@ module-name = "rgapi._core"
 
 [tool.fastship]
 branch = "main"
-
-[tool.fastship.rs]
-bins = []
