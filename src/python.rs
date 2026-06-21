@@ -234,6 +234,7 @@ fn walk_py(
         same_file_system,
         files,
         dirs,
+        panic_probe: false,
     };
     find(&opts).map_err(|e| PyValueError::new_err(e.to_string()))
 }
@@ -277,6 +278,7 @@ fn find_py(
         same_file_system,
         files,
         dirs,
+        panic_probe: false,
     };
     find(&opts).map_err(|e| PyValueError::new_err(e.to_string()))
 }
@@ -365,6 +367,7 @@ fn rg_py(
         smart_case,
         before_context,
         after_context,
+        panic_probe: false,
     };
     let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     collect_rg_py(py, iter)
@@ -412,10 +415,35 @@ fn rg_iter_py(
         smart_case,
         before_context,
         after_context,
+        panic_probe: false,
     };
     rg_iter_core(&opts)
         .map(|inner| RgIterPy { inner })
         .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
+#[pyfunction(name = "panic_probe")]
+#[pyo3(signature = (root=".", walk=false))]
+fn panic_probe_py(py: Python<'_>, root: &str, walk: bool) -> PyResult<()> {
+    let root = PathBuf::from(root);
+    if walk {
+        let opts = FindOptions {
+            root,
+            panic_probe: true,
+            ..FindOptions::default()
+        };
+        find(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    } else {
+        let opts = RgOptions {
+            root,
+            pattern: "panic_probe".to_string(),
+            panic_probe: true,
+            ..RgOptions::default()
+        };
+        let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        collect_rg_py(py, iter)?;
+    }
+    Ok(())
 }
 
 impl From<SearchLine> for SearchLinePy {
@@ -442,5 +470,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(rg_iter_py, m)?)?;
     m.add_function(wrap_pyfunction!(search_text_py, m)?)?;
     m.add_function(wrap_pyfunction!(search_path_py, m)?)?;
+    m.add_function(wrap_pyfunction!(panic_probe_py, m)?)?;
     Ok(())
 }

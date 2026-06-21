@@ -70,6 +70,7 @@ pub struct RgOptions {
     pub smart_case: bool,
     pub before_context: usize,
     pub after_context: usize,
+    pub panic_probe: bool,
 }
 
 impl Default for RgOptions {
@@ -94,6 +95,7 @@ impl Default for RgOptions {
             smart_case: false,
             before_context: 0,
             after_context: 0,
+            panic_probe: false,
         }
     }
 }
@@ -180,6 +182,7 @@ fn run_parallel_search(
     filter_dirs(&mut walker, &root, filters.clone());
     let before_context = opts.before_context;
     let after_context = opts.after_context;
+    let panic_probe = opts.panic_probe;
     walker.build_parallel().run(|| {
         let tx = tx.clone();
         let root = root.clone();
@@ -190,6 +193,9 @@ fn run_parallel_search(
         let cancel = cancel.clone();
         Box::new(move |entry| {
             catch_unwind(AssertUnwindSafe(|| {
+                if panic_probe {
+                    panic!("rgapi: deliberate panic for tests (panic_probe)");
+                }
                 search_entry(
                     entry,
                     &root,
@@ -221,10 +227,6 @@ fn search_entry(
     tx: &Sender<Result<SearchLine, RgApiError>>,
     cancel: &Arc<AtomicBool>,
 ) -> WalkState {
-    #[cfg(debug_assertions)]
-    if std::env::var_os("RGAPI_TEST_PANIC").is_some() {
-        panic!("rgapi: deliberate panic for tests (RGAPI_TEST_PANIC is set)");
-    }
     if is_cancelled(cancel) {
         return WalkState::Quit;
     }

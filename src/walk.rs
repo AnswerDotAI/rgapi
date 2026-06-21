@@ -28,6 +28,7 @@ pub struct FindOptions {
     pub same_file_system: bool,
     pub files: bool,
     pub dirs: bool,
+    pub panic_probe: bool,
 }
 
 impl Default for FindOptions {
@@ -50,6 +51,7 @@ impl Default for FindOptions {
             same_file_system: false,
             files: true,
             dirs: false,
+            panic_probe: false,
         }
     }
 }
@@ -80,6 +82,7 @@ pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
     let pattern = opts.pattern.clone();
     let files = opts.files;
     let dirs = opts.dirs;
+    let panic_probe = opts.panic_probe;
     walker.build_parallel().run(|| {
         let tx = tx.clone();
         let root = root.clone();
@@ -87,6 +90,9 @@ pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
         let pattern = pattern.clone();
         Box::new(move |entry| {
             let outcome = catch_unwind(AssertUnwindSafe(|| {
+                if panic_probe {
+                    panic!("rgapi: deliberate panic for tests (panic_probe)");
+                }
                 find_entry(entry, &root, &filters, pattern.as_deref(), files, dirs)
             }))
             .unwrap_or_else(|_| {
@@ -121,10 +127,6 @@ fn find_entry(
     files: bool,
     dirs: bool,
 ) -> Result<Option<String>, RgApiError> {
-    #[cfg(debug_assertions)]
-    if std::env::var_os("RGAPI_TEST_PANIC").is_some() {
-        panic!("rgapi: deliberate panic for tests (RGAPI_TEST_PANIC is set)");
-    }
     let dent = entry.map_err(|e| RgApiError::new(e.to_string()))?;
     let path = dent.path();
     if path == root {

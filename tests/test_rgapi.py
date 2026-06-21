@@ -2,6 +2,7 @@ import _thread, threading
 
 import pytest
 
+from rgapi import _core
 from rgapi import Regex, SearchResults, compile, fd, rg, rg_iter, search_path, search_text, walk
 
 
@@ -135,15 +136,13 @@ def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
     assert str(stream) == repr(stream)
 
 
-def test_worker_panic_surfaces_as_error_not_truncation(tmp_path, monkeypatch):
+def test_worker_panic_surfaces_as_error_not_truncation(tmp_path):
     # A panic inside a parallel search/walk worker must raise, not silently end the
-    # result stream (which would look like "no matches"). Triggered via a
-    # debug-build-only env hook compiled into search_entry/find_entry.
+    # result stream (which would look like "no matches"). `_core.panic_probe` arms the
+    # panic flag and runs the real search/walk machinery so the catch_unwind path is exercised.
     (tmp_path / "a.py").write_text("TODO here\n")
-    monkeypatch.setenv("RGAPI_TEST_PANIC", "1")
-    with pytest.raises(Exception): rg("TODO", str(tmp_path))
-    with pytest.raises(Exception): list(rg_iter("TODO", str(tmp_path)))
-    with pytest.raises(Exception): fd(str(tmp_path))
+    with pytest.raises(Exception): _core.panic_probe(str(tmp_path))             # search workers
+    with pytest.raises(Exception): _core.panic_probe(str(tmp_path), walk=True)  # walk workers
 
 
 def test_search_path_skips_binary_and_invalid_utf8(tmp_path):
