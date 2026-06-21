@@ -72,6 +72,20 @@ def test_path_filters_prune_dirs_and_follow_links(tmp_path):
     assert fd(str(tmp_path), path_re=r"linked/.*\.py$", follow_links=False) == []
     assert fd(str(tmp_path), path_re=r"linked/.*\.py$", follow_links=True) == ["linked/app.py"]
 
+def test_rgignore_is_honored(tmp_path):
+    (tmp_path / ".rgignore").write_text("only_rg.txt\n")
+    (tmp_path / "only_rg.txt").write_text("hi\n")
+    (tmp_path / "keep.txt").write_text("hi\n")
+    assert set(fd(str(tmp_path))) == {"keep.txt"}
+    assert set(fd(str(tmp_path), ignore=False)) == {"keep.txt", "only_rg.txt"}
+
+def test_rgignore_can_override_gitignore(tmp_path):
+    (tmp_path / ".gitignore").write_text("*/\n")
+    (tmp_path / ".rgignore").write_text("!*/\n")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "app.py").write_text("hi\n")
+    assert "sub/app.py" in set(fd(str(tmp_path)))
+
 def test_depth_size_and_filesystem_options(tmp_path):
     (tmp_path / "top.txt").write_text("TODO\n")
     sub = tmp_path / "sub"
@@ -119,6 +133,17 @@ def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
     assert p.texts == [str(res[1])]
     assert repr(stream) == "RgIter(SearchLine stream)"
     assert str(stream) == repr(stream)
+
+
+def test_worker_panic_surfaces_as_error_not_truncation(tmp_path, monkeypatch):
+    # A panic inside a parallel search/walk worker must raise, not silently end the
+    # result stream (which would look like "no matches"). Triggered via a
+    # debug-build-only env hook compiled into search_entry/find_entry.
+    (tmp_path / "a.py").write_text("TODO here\n")
+    monkeypatch.setenv("RGAPI_TEST_PANIC", "1")
+    with pytest.raises(Exception): rg("TODO", str(tmp_path))
+    with pytest.raises(Exception): list(rg_iter("TODO", str(tmp_path)))
+    with pytest.raises(Exception): fd(str(tmp_path))
 
 
 def test_search_path_skips_binary_and_invalid_utf8(tmp_path):

@@ -38,7 +38,7 @@ pip install rgapi
 
 ## Semantics
 
-`fd` and `walk` return slash-separated paths relative to `root`. They use the `ignore` crate, so `.gitignore` and the usual ripgrep filters apply by default. Hidden files are skipped unless `hidden=True`. Pass `ignore=False` to disable ignore filtering. Symlinks are not followed unless `follow_links=True`; `same_file_system=True` avoids crossing filesystem boundaries. Traversal is parallel, and result order is not guaranteed; use `sorted(...)` if order matters.
+`fd` and `walk` return slash-separated paths relative to `root`. They use the `ignore` crate, so `.gitignore`, `.ignore`, and the usual ripgrep filters apply by default. `.rgignore` files are also honored and take precedence over `.gitignore`. Hidden files are skipped unless `hidden=True`. Pass `ignore=False` to disable all ignore filtering (including `.rgignore`). Symlinks are not followed unless `follow_links=True`; `same_file_system=True` avoids crossing filesystem boundaries. Traversal is parallel, and result order is not guaranteed; use `sorted(...)` if order matters.
 `root` arguments accept `str` or `pathlib.Path` and expand `~`; `search_path` also accepts path-like file paths. Display labels such as `display_path` are stringified without expansion.
 
 `fd` adds fd-like filtering on top of `walk`: `pattern` is a substring match on the relative path, and `include`/`exclude` use glob syntax. `glob=` is accepted as an alias for `include=`. A basename glob such as `*.py` also matches recursively, so it finds `src/app.py`. Use `ext="py"` or `ext=["py", "rs"]` for extension filters, `min_depth=`/`max_depth=` to bound recursion, and `max_filesize=` to skip files above a byte limit.

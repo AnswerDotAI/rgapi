@@ -1,3 +1,4 @@
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 
@@ -85,7 +86,15 @@ pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
         let filters = filters.clone();
         let pattern = pattern.clone();
         Box::new(move |entry| {
-            match find_entry(entry, &root, &filters, pattern.as_deref(), files, dirs) {
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                find_entry(entry, &root, &filters, pattern.as_deref(), files, dirs)
+            }))
+            .unwrap_or_else(|_| {
+                Err(RgApiError::new(
+                    "internal error during walk (this is a bug, please report it)",
+                ))
+            });
+            match outcome {
                 Ok(Some(path)) => {
                     if tx.send(Ok(path)).is_err() {
                         return WalkState::Quit;
@@ -112,6 +121,10 @@ fn find_entry(
     files: bool,
     dirs: bool,
 ) -> Result<Option<String>, RgApiError> {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("RGAPI_TEST_PANIC").is_some() {
+        panic!("rgapi: deliberate panic for tests (RGAPI_TEST_PANIC is set)");
+    }
     let dent = entry.map_err(|e| RgApiError::new(e.to_string()))?;
     let path = dent.path();
     if path == root {
@@ -170,6 +183,9 @@ pub(crate) fn configure_walker(
     same_file_system: bool,
 ) {
     walker.standard_filters(ignore);
+    if ignore {
+        walker.add_custom_ignore_filename(".rgignore");
+    }
     walker.hidden(!hidden);
     walker.require_git(false);
     walker.max_depth(max_depth);

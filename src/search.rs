@@ -1,3 +1,4 @@
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -188,16 +189,24 @@ fn run_parallel_search(
         let after_context = after_context;
         let cancel = cancel.clone();
         Box::new(move |entry| {
-            search_entry(
-                entry,
-                &root,
-                &filters,
-                &matcher,
-                before_context,
-                after_context,
-                &tx,
-                &cancel,
-            )
+            catch_unwind(AssertUnwindSafe(|| {
+                search_entry(
+                    entry,
+                    &root,
+                    &filters,
+                    &matcher,
+                    before_context,
+                    after_context,
+                    &tx,
+                    &cancel,
+                )
+            }))
+            .unwrap_or_else(|_| {
+                let _ = tx.send(Err(RgApiError::new(
+                    "internal error during search (this is a bug, please report it)",
+                )));
+                WalkState::Quit
+            })
         })
     });
 }
@@ -212,6 +221,10 @@ fn search_entry(
     tx: &Sender<Result<SearchLine, RgApiError>>,
     cancel: &Arc<AtomicBool>,
 ) -> WalkState {
+    #[cfg(debug_assertions)]
+    if std::env::var_os("RGAPI_TEST_PANIC").is_some() {
+        panic!("rgapi: deliberate panic for tests (RGAPI_TEST_PANIC is set)");
+    }
     if is_cancelled(cancel) {
         return WalkState::Quit;
     }
