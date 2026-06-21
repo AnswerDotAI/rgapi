@@ -23,6 +23,9 @@ Homepage = "https://github.com/AnswerDotAI/rgapi"
 Repository = "https://github.com/AnswerDotAI/rgapi"
 Issues = "https://github.com/AnswerDotAI/rgapi/issues"
 
+[project.entry-points.pyskills]
+rgapi = "rgapi.skill"
+
 [project.entry-points.fastaudit_safe_native]
 rgapi = "rgapi"
 
