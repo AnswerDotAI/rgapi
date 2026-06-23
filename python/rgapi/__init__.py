@@ -196,16 +196,4 @@ def search_path(
     return SearchResults(_core.search_path(matcher, _fs_path(path), _display_path(display_path), before_context, after_context))
 
 
-__all__ = [
-    "Regex",
-    "RgIter",
-    "SearchLine",
-    "SearchResults",
-    "compile",
-    "fd",
-    "rg",
-    "rg_iter",
-    "search_path",
-    "search_text",
-    "walk",
-]
+__all__ = [ "RgIter", "fd", "rg", "rg_iter" ]
