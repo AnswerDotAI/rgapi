@@ -30,6 +30,11 @@ struct SearchLinePy {
     matches: Vec<(usize, usize)>,
 }
 
+fn preview(text: &str, width: usize) -> String {
+    if text.chars().count() <= width { return text.to_string(); }
+    format!("{}…", text.chars().take(width).collect::<String>())
+}
+
 #[pymethods]
 impl SearchLinePy {
     fn asdict(&self, py: Python<'_>) -> PyResult<Py<PyDict>> {
@@ -52,7 +57,7 @@ impl SearchLinePy {
         let sep = if self.kind == "match" { ":" } else { "-" };
         format!(
             "{}{}{}{}{}",
-            self.path, sep, self.line_number, sep, self.line
+            self.path, sep, self.line_number, sep, preview(&self.line, 120)
         )
     }
     fn _repr_pretty_(&self, p: &Bound<'_, PyAny>, cycle: bool) -> PyResult<()> {

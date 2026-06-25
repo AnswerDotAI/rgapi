@@ -65,7 +65,7 @@ matches      list of (start, end) byte offsets for match rows
 
 `rg`, `search_text`, and `search_path` return `SearchResults` by default, a list subclass whose `str()` and notebook pretty display are rg-style multiline text. `rg_iter` yields rows lazily.
 
-`SearchLine` has a structured `repr`, an rg-style `str`, and `SearchLine.asdict()` returns row fields as a plain Python dict. `rg(..., paths=True)` returns unique matched paths, and `rg(..., count=True)` returns the total number of match spans. `paths` and `count` cannot both be set.
+`SearchLine` has a structured `repr`, an rg-style `str` (the `line` is truncated to 120 chars with a trailing `…` for display; `repr` and `asdict()` keep the full line), and `SearchLine.asdict()` returns row fields as a plain Python dict. `rg(..., paths=True)` returns unique matched paths, and `rg(..., count=True)` returns the total number of match spans. `paths` and `count` cannot both be set.
 
 `before_context`, `after_context`, and `context` are like `rg -B`, `rg -A`, and `rg -C`. Files containing NUL bytes or invalid UTF-8 are skipped.
 

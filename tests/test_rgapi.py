@@ -136,6 +136,21 @@ def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
     assert str(stream) == repr(stream)
 
 
+def test_rg_str_truncates_long_lines_to_120_chars(tmp_path):
+    long = "x" * 200
+    (tmp_path / "a.py").write_text(f"TODO {long}\n")
+    short = "TODO é" + "y" * 130  # multibyte char before the cut point
+    (tmp_path / "b.py").write_text(short + "\n")
+    res = rg("TODO", str(tmp_path))
+    line_a = next(r for r in res if r.path == "a.py")
+    assert line_a.line == f"TODO {long}"                       # data stays full
+    s = str(line_a)
+    assert s == f"a.py:1:{('TODO ' + long)[:120]}…"       # display truncated + ellipsis
+    assert repr(line_a).endswith(f'line="TODO {long}", matches=[(0, 4)])')
+    line_b = next(r for r in res if r.path == "b.py")
+    assert str(line_b) == f"b.py:1:{short[:120]}…"        # char-safe, no panic on é
+
+
 def test_worker_panic_surfaces_as_error_not_truncation(tmp_path):
     # A panic inside a parallel search/walk worker must raise, not silently end the
     # result stream (which would look like "no matches"). `_core.panic_probe` arms the
