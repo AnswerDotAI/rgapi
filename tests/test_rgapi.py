@@ -261,6 +261,25 @@ def test_nbrg_cell_context(tmp_path):
     assert kinds == {"c0": "context", "c1": "match", "c2": "context"}
 
 
+def test_file_as_root_searches_just_that_file(tmp_path):
+    (tmp_path / "a.txt").write_text("hello TODO world\nsecond TODO\n")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.txt").write_text("TODO in sub\n")
+    write_nb(tmp_path / "nb.ipynb", [_cell("code", ["read_csv(x)\n"], cid="c1")])
+    af = str(tmp_path / "a.txt")
+    assert [str(r) for r in rg("TODO", af)] == ["a.txt:1:hello TODO world", "a.txt:2:second TODO"]
+    assert rg("TODO", af, paths=True) == ["a.txt"]
+    assert rg("TODO", af, count=True) == 2
+    assert list(rg_iter("TODO", af)) == rg("TODO", af)
+    assert fd(af) == ["a.txt"]
+    # explicit file is searched even when gitignored
+    (tmp_path / ".gitignore").write_text("a.txt\n")
+    assert rg("TODO", af, paths=True) == ["a.txt"]
+    from rgapi import nbrg
+    assert [c.cell_id for c in nbrg("read_csv", str(tmp_path / "nb.ipynb"))] == ["c1"]
+    with pytest.raises(Exception): rg("TODO", str(tmp_path / "nope.txt"))
+
+
 def test_nbrg_skips_bad_json(tmp_path):
     from rgapi import nbrg
     write_nb(tmp_path / "good.ipynb", [_cell("code", ["read_csv(x)\n"], cid="g1")])

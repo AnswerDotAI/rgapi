@@ -14,7 +14,7 @@ use grep_searcher::{
 };
 use ignore::{DirEntry, WalkBuilder, WalkState};
 
-use crate::walk::{configure_walker, filter_dirs, normalize_root, rel_path, PathFilters};
+use crate::walk::{configure_walker, filter_dirs, normalize_root, rel_path, resolve_root, PathFilters};
 use crate::RgApiError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,9 +105,11 @@ pub fn rg(opts: &RgOptions) -> Result<Vec<SearchLine>, RgApiError> {
 }
 
 pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
-    let root = normalize_root(&opts.root)?;
+    let (root_in, includes, max_depth, ignore, hidden) =
+        resolve_root(&opts.root, &opts.includes, opts.max_depth, opts.ignore, opts.hidden);
+    let root = normalize_root(&root_in)?;
     let filters = Arc::new(PathFilters::new(
-        &opts.includes,
+        &includes,
         &opts.excludes,
         opts.path_re.as_deref(),
         opts.skip_path_re.as_deref(),
@@ -115,7 +117,8 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
         opts.skip_dir_re.as_deref(),
     )?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case)?;
-    let opts = opts.clone();
+    let mut opts = opts.clone();
+    (opts.ignore, opts.hidden, opts.max_depth) = (ignore, hidden, max_depth);
     let cancel = Arc::new(AtomicBool::new(false));
     let worker_cancel = cancel.clone();
     let (tx, rx) = mpsc::channel();

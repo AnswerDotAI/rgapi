@@ -57,9 +57,11 @@ impl Default for FindOptions {
 }
 
 pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
-    let root = normalize_root(&opts.root)?;
+    let (root_in, includes, max_depth, ignore, hidden) =
+        resolve_root(&opts.root, &opts.includes, opts.max_depth, opts.ignore, opts.hidden);
+    let root = normalize_root(&root_in)?;
     let filters = Arc::new(PathFilters::new(
-        &opts.includes,
+        &includes,
         &opts.excludes,
         opts.path_re.as_deref(),
         opts.skip_path_re.as_deref(),
@@ -69,9 +71,9 @@ pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
     let mut walker = WalkBuilder::new(&root);
     configure_walker(
         &mut walker,
-        opts.ignore,
-        opts.hidden,
-        opts.max_depth,
+        ignore,
+        hidden,
+        max_depth,
         opts.min_depth,
         opts.max_filesize,
         opts.follow_links,
@@ -154,6 +156,29 @@ fn find_entry(
         return Ok(None);
     }
     Ok(Some(rel))
+}
+
+// If `root` is a file, rewrite the walk to its parent directory matching only that file, so
+// passing a filename as `root` searches just that file (like `rg FILE`). Returns the walk root,
+// includes, and the max_depth/ignore/hidden to use (depth 1, ignore/hidden off so the named file
+// is always found). For a directory, returns the inputs unchanged.
+pub(crate) fn resolve_root(
+    root: &Path,
+    includes: &[String],
+    max_depth: Option<usize>,
+    ignore: bool,
+    hidden: bool,
+) -> (PathBuf, Vec<String>, Option<usize>, bool, bool) {
+    if root.is_file() {
+        if let Some(name) = root.file_name() {
+            let parent = match root.parent() {
+                Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+                _ => PathBuf::from("."),
+            };
+            return (parent, vec![globset::escape(&name.to_string_lossy())], Some(1), false, true);
+        }
+    }
+    (root.to_path_buf(), includes.to_vec(), max_depth, ignore, hidden)
 }
 
 pub(crate) fn normalize_root(path: &Path) -> Result<PathBuf, RgApiError> {
