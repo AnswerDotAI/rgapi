@@ -1,4 +1,4 @@
-import _thread, threading
+import _thread, json, threading
 
 import pytest
 
@@ -188,3 +188,107 @@ def test_direct_regex_and_search_apis(tmp_path):
     assert [(r.kind, r.path, r.line_number, r.line, r.matches) for r in path_res] == [
         ("match", "display.py", 2, "TODO here", [(0, 4)])]
     assert path_res[0].asdict() == dict(kind="match", path="display.py", line_number=2, line="TODO here", matches=[(0, 4)])
+
+
+def write_nb(path, cells):
+    nb = {"cells": cells, "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
+    path.write_text(json.dumps(nb))
+
+def _cell(cell_type, source, cid=None, outputs=None):
+    c = {"cell_type": cell_type, "metadata": {}, "source": source}
+    if cell_type == "code":
+        c["execution_count"] = None
+        c["outputs"] = outputs or []
+    if cid is not None: c["id"] = cid
+    return c
+
+
+def test_nbrg_source_only_with_cells(tmp_path):
+    from rgapi import nbrg
+    write_nb(tmp_path / "nb.ipynb", [
+        _cell("code", ["import os\n", "def foo():\n", "    return 1\n"], cid="c1",
+              outputs=[{"output_type": "stream", "name": "stdout", "text": ["foo ran\n"]}]),
+        _cell("code", ["print('hi')\n"], cid="c2",
+              outputs=[{"output_type": "stream", "name": "stdout", "text": ["foo in output\n"]}]),
+        _cell("markdown", ["# Title\n", "use foo here\n"], cid="m1"),
+    ])
+    res = nbrg("foo", str(tmp_path))
+    # c2 has 'foo' only in its output, so source-only search must skip it
+    assert {c.cell_id for c in res} == {"c1", "m1"}
+    c1 = next(c for c in res if c.cell_id == "c1")
+    assert c1.cell_type == "code" and c1.kind == "match"
+    assert [m.line_number for m in c1.matches] == [2]
+    assert c1.matches[0].line == "def foo():"
+    assert c1.matches[0].matches == [(4, 7)]
+    m1 = next(c for c in res if c.cell_id == "m1")
+    assert m1.cell_type == "markdown"
+    assert [m.line for m in m1.matches] == ["use foo here"]
+
+
+def test_nbrg_string_source_and_missing_id(tmp_path):
+    from rgapi import nbrg
+    write_nb(tmp_path / "nb.ipynb", [_cell("code", "x = 1\nfoo = 2\n")])
+    res = nbrg("foo", str(tmp_path))
+    assert len(res) == 1
+    assert res[0].cell_id == "0"
+    assert res[0].matches[0].line == "foo = 2"
+    assert res[0].matches[0].line_number == 2
+
+
+def test_nbrg_multiple_matches_single_cell_appears_once(tmp_path):
+    from rgapi import nbrg
+    write_nb(tmp_path / "nb.ipynb", [
+        _cell("code", ["foo = 1\n", "bar = 2\n", "baz = foo + foo\n"], cid="c1"),
+    ])
+    res = nbrg("foo", str(tmp_path))
+    assert len(res) == 1                                     # cell appears once, not once per match
+    assert [c.cell_id for c in res] == ["c1"]
+    cell = res[0]
+    assert [m.line_number for m in cell.matches] == [1, 3]   # both matching lines kept
+    assert cell.matches[1].matches == [(6, 9), (12, 15)]     # two spans on the same line
+
+
+def test_nbrg_cell_context(tmp_path):
+    from rgapi import nbrg
+    write_nb(tmp_path / "nb.ipynb", [
+        _cell("code", ["a = 1\n"], cid="c0"),
+        _cell("code", ["target = 2\n"], cid="c1"),
+        _cell("code", ["b = 3\n"], cid="c2"),
+        _cell("code", ["c = 4\n"], cid="c3"),
+    ])
+    res = nbrg("target", str(tmp_path), cell_context=1)
+    kinds = {c.cell_id: c.kind for c in res}
+    assert kinds == {"c0": "context", "c1": "match", "c2": "context"}
+
+
+def test_nbrg_skips_bad_json_and_prefilter_parity(tmp_path):
+    from rgapi import nbrg
+    write_nb(tmp_path / "good.ipynb", [_cell("code", ["read_csv(x)\n"], cid="g1")])
+    (tmp_path / "bad.ipynb").write_text("{not valid json")
+    a = nbrg("read_csv", str(tmp_path))
+    b = nbrg("read_csv", str(tmp_path), prefilter=True)
+    assert {c.cell_id for c in a} == {"g1"}
+    assert {c.cell_id for c in b} == {"g1"}
+
+
+def test_search_nb_single_and_asdict_str(tmp_path):
+    from rgapi import compile, search_nb
+    p = tmp_path / "nb.ipynb"
+    write_nb(p, [_cell("code", ["def foo():\n", "    return 1\n"], cid="c1")])
+    res = search_nb(compile("foo"), p, display_path="nb.ipynb")
+    assert len(res) == 1
+    cell = res[0]
+    assert str(cell) == "nb.ipynb:c1:def foo():\\n    return 1"   # cell-oriented: whole cell, newlines escaped
+    d = cell.asdict()
+    assert d["cell_id"] == "c1" and d["cell_type"] == "code" and d["kind"] == "match"
+    assert d["matches"][0]["line"] == "def foo():"
+
+
+def test_nbcell_str_truncates_and_escapes(tmp_path):
+    from rgapi import compile, search_nb
+    p = tmp_path / "nb.ipynb"
+    write_nb(p, [_cell("code", ["x = '" + "a" * 500 + "'  # foo\n"], cid="c1")])
+    s = str(search_nb(compile("foo"), p, display_path="nb.ipynb")[0])
+    assert "\n" not in s            # newlines escaped to a single display line
+    assert s.endswith("…")          # long cell is truncated
+    assert s.startswith("nb.ipynb:c1:")

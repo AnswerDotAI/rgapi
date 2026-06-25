@@ -196,4 +196,6 @@ def search_path(
     return SearchResults(_core.search_path(matcher, _fs_path(path), _display_path(display_path), before_context, after_context))
 
 
-__all__ = [ "RgIter", "fd", "rg", "rg_iter" ]
+from .nb import NbCell, NbResults, nbrg, search_nb
+
+__all__ = [ "RgIter", "fd", "rg", "rg_iter", "nbrg" ]

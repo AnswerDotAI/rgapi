@@ -16,6 +16,14 @@ for row in rg_iter("TODO", ".", include="*.py", context=2): print(row.asdict())
 rg("TODO", ".", ext="py", skip_dir=".venv", paths=True)
 ```
 
+For cell-aware search of Jupyter notebooks (see [Notebooks](#notebooks)):
+
+```python
+from rgapi import nbrg
+
+nbrg("read_csv", ".", cell_context=1)
+```
+
 For direct access to the regex, search, and walk pieces:
 
 ```python
@@ -62,6 +70,35 @@ matches      list of (start, end) byte offsets for match rows
 `before_context`, `after_context`, and `context` are like `rg -B`, `rg -A`, and `rg -C`. Files containing NUL bytes or invalid UTF-8 are skipped.
 
 Search is case-sensitive by default, matching `rg`. Use `smart_case=True` for `rg --smart-case` behavior, or `case_sensitive=False` to force case-insensitive matching.
+
+## Notebooks
+
+`nbrg` searches Jupyter `.ipynb` files cell-by-cell, so results are *cells* rather than raw JSON lines. Searching a notebook with plain `rg` matches the escaped JSON text (including outputs and metadata) and reports JSON line numbers; `nbrg` instead searches each cell's reconstructed **source** and returns the cells that matched.
+
+```python
+from rgapi import nbrg
+
+nbrg("read_csv", ".")                  # cells whose source matches, across all notebooks under "."
+nbrg("read_csv", ".", cell_context=1)  # also include neighbouring cells as context
+```
+
+It finds notebooks with the fast parallel Rust walker (`fd`), then matches each cell's source through the same Rust engine as `rg` (via `search_text`), so regex behaviour and the `case_sensitive`/`smart_case` flags match `rg`. Only cell `source` is searched, not outputs or metadata. `nbrg` accepts the same discovery filters as `fd`/`rg` (`include`, `exclude`, `glob`, `hidden`, `max_depth`, `skip_dir`, …).
+
+`nbrg` returns `NbResults`, a list of `NbCell`. Each `NbCell` has:
+
+```text
+path         notebook path relative to root
+cell_index   0-based position of the cell in the notebook
+cell_id      nbformat cell id (falls back to the cell index for notebooks without ids)
+cell_type    'code', 'markdown', or 'raw'
+kind         'match' or 'context'
+source       full cell source
+matches      list of SearchLine rows for the matched lines within the cell
+```
+
+`NbCell.asdict()` returns those fields as a plain dict (with `matches` as `SearchLine` dicts). `str()`/pretty display is one truncated, newline-escaped line per cell: `path:cell_id:source` for matches and `path:cell_id-source` for context cells. A cell with several matches appears once, with every hit collected in `matches`.
+
+`cell_context=N` includes the `N` cells before and after each matching cell as `kind="context"` rows (deduplicated per notebook). `prefilter=True` first narrows candidate notebooks with `rg` before the per-cell search; it is faster on notebook-heavy trees but can miss matches whose pattern is affected by JSON escaping (quotes, backslashes, regex metacharacters straddling escapes), so it is off by default.
 
 ## Benchmarks
 

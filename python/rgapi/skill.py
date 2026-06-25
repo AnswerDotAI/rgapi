@@ -5,6 +5,7 @@ rgapi wraps the same `ignore`, `grep-regex`, and `grep-searcher` crates ripgrep 
 Core APIs:
 - `fd(root=".", ...)` finds paths with fd-style filters (`pattern` substring, `include`/`exclude`/`glob`, `ext`); returns slash-separated relative paths.
 - `rg(pattern, root=".", ...)` searches and returns `SearchResults` (or `paths=True` for unique matched paths, `count=True` for a match-span total). NB: The `SearchResults` repr shows an rg-style multiline string, which is usually the most ergonomic approach.
+- `nbrg(pattern, root=".", cell_context=0, ...)` searches Jupyter `.ipynb` files (cell source only) and returns matched cells as `NbResults`/`NbCell`, which have a nice repr like rg(). Use this for notebooks rather than `rg`, to avoid escaping problems, and to get back message IDs.
 
 SearchLine rows:
   kind         'match', 'before', 'after', or 'context'
@@ -14,11 +15,20 @@ SearchLine rows:
   matches      list of (start, end) byte offsets, for 'match' rows
   asdict()     returns the row fields as a plain dict
 
+NbCell rows (from `nbrg`):
+  path/cell_index/cell_id/cell_type    locate the cell ('code'/'markdown'/'raw')
+  kind         'match' or 'context'
+  source       full cell source
+  matches      list of SearchLine rows for the matched lines within the cell
+  asdict()     returns the cell fields as a plain dict
+`cell_context=N` adds N neighbour cells as 'context'. `prefilter=True` narrows notebooks with `rg` first (faster, but can miss patterns affected by JSON escaping; off by default).
+
 Important:
 Traversal is parallel and result order is NOT guaranteed; wrap in `sorted(...)` if you need stable order. `path_re`/`skip_path_re` filter the returned/searched paths but do not prune traversal; use `skip_dir`/`skip_dir_re` to prune whole subtrees for speed. Run `doc(func)` for full parameter docments.
 """
 
 from . import Regex, RgIter, SearchLine, SearchResults, compile, fd, rg, rg_iter, search_path, search_text, walk
+from . import NbCell, NbResults, nbrg, search_nb
 
-__all__ = ["Regex", "RgIter", "SearchLine", "SearchResults", "compile", "fd", "rg", "rg_iter", "search_path", "search_text", "walk"]
+__all__ = [ "RgIter", "fd", "rg", "rg_iter", "nbrg" ]
 
