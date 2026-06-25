@@ -1,15 +1,10 @@
 "Notebook-aware search: run `rg`-style search over `.ipynb` files, returning matched cells instead of raw JSON lines."
 
-import json
 from pathlib import Path
 from fastcore.meta import delegates
 
-from . import compile, fd, rg, search_text
+from . import _core, fd, _filters, _fs_path, _listify
 
-
-def _cell_source(cell):
-    src = cell.get("source", "")
-    return "".join(src) if isinstance(src, list) else src
 
 def _preview(text, width=120):
     text = text.rstrip("\n").replace("\n", "\\n")
@@ -44,35 +39,24 @@ class NbResults(list):
     def _repr_pretty_(self, p, cycle): p.text("..." if cycle else str(self))
 
 
+def _rows_to_cells(rows):
+    return [NbCell(p, ci, cid, ct, kind, src, list(matches)) for p,ci,cid,ct,kind,src,matches in rows]
+
+
 def search_nb(
-    matcher,                 # Compiled `Regex` from `compile()`
-    path,                    # Notebook file to search (expands `~`)
-    cell_context:int=0,      # Cells of context to include before/after each matching cell
-    display_path:str=None    # Path stored in results; defaults to `path`
+    pattern:str,                  # Regex pattern to search for
+    path,                         # Notebook file to search (expands `~`)
+    cell_context:int=0,           # Cells of context to include before/after each matching cell
+    case_sensitive:bool|None=None,# True/False forces case; None allows `smart_case`
+    smart_case:bool=False,        # Match `rg --smart-case` behavior
+    display_path:str=None         # Path stored in results; defaults to `path`
 ) -> NbResults:
-    "Search one `.ipynb` file's cell sources with a compiled matcher."
+    "Search one `.ipynb` file's cell sources, returning matched cells."
     disp = display_path if display_path is not None else str(path)
-    try: nb = json.loads(Path(path).expanduser().read_text())
-    except (ValueError, OSError, UnicodeDecodeError): return NbResults()
-    cells = nb.get("cells")
-    if not isinstance(cells, list): return NbResults()
-    info,matched = {},{}
-    for i,cell in enumerate(cells):
-        if not isinstance(cell, dict): continue
-        src = _cell_source(cell)
-        info[i] = (str(cell.get("id", i)), cell.get("cell_type", ""), src)
-        hits = [m for m in search_text(matcher, src, path=disp) if m.kind == "match"]
-        if hits: matched[i] = hits
-    if not matched: return NbResults()
-    emit = {i:"match" for i in matched}
-    if cell_context:
-        for i in matched:
-            for j in range(max(0, i-cell_context), min(len(cells), i+cell_context+1)): emit.setdefault(j, "context")
-    res = NbResults()
-    for i in sorted(emit):
-        if i not in info: continue
-        cid,ctype,src = info[i]
-        res.append(NbCell(disp, i, cid, ctype, emit[i], src, matched.get(i, [])))
+    rows = _core.nb_search_file(pattern, _fs_path(path), disp, case_sensitive=case_sensitive,
+        smart_case=smart_case, cell_context=cell_context)
+    res = NbResults(_rows_to_cells(rows))
+    res.sort(key=lambda c: c.cell_index)
     return res
 
 
@@ -80,17 +64,19 @@ def search_nb(
 def nbrg(
     pattern:str,                  # Regex pattern to search for
     root:str=".",                 # Directory to search (expands `~`)
-    prefilter:bool=False,         # Pre-narrow notebooks with `rg` before per-cell search (may miss escape-affected patterns)
     cell_context:int=0,           # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None,# True/False forces case; None allows `smart_case`
     smart_case:bool=False,        # Match `rg --smart-case` behavior
     **kwargs
 ) -> NbResults:
-    "Search `.ipynb` cell sources under `root`, returning matched cells."
-    matcher = compile(pattern, case_sensitive=case_sensitive, smart_case=smart_case)
-    if prefilter: paths = rg(pattern, root, ext="ipynb", case_sensitive=case_sensitive, smart_case=smart_case, paths=True, **kwargs)
-    else: paths = fd(root, ext="ipynb", **kwargs)
-    base = Path(root).expanduser()
-    res = NbResults()
-    for rel in sorted(paths): res += search_nb(matcher, base/rel, cell_context=cell_context, display_path=rel)
+    "Search `.ipynb` cell sources under `root` in parallel, returning matched cells."
+    includes, excludes = _filters(kwargs.pop("glob", None), kwargs.pop("include", None), kwargs.pop("exclude", None), "ipynb")
+    rows = _core.nb_search(pattern, _fs_path(root), includes, excludes,
+        kwargs.pop("hidden", False), kwargs.pop("ignore", True), kwargs.pop("max_depth", None),
+        kwargs.pop("min_depth", None), kwargs.pop("max_filesize", None), kwargs.pop("follow_links", False),
+        kwargs.pop("same_file_system", False), kwargs.pop("path_re", None), kwargs.pop("skip_path_re", None),
+        _listify(kwargs.pop("skip_dir", None)), kwargs.pop("skip_dir_re", None),
+        case_sensitive, smart_case, cell_context)
+    res = NbResults(_rows_to_cells(rows))
+    res.sort(key=lambda c: (c.path, c.cell_index))
     return res

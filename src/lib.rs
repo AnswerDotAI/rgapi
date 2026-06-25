@@ -1,10 +1,12 @@
 //! rgapi - Python-friendly wrappers around ripgrep's walking and searching crates.
 
+mod nb;
 mod search;
 mod walk;
 
 mod python;
 
+pub use nb::{nb_search, nb_search_file, NbCell, NbOptions};
 pub use search::{
     compile_regex, rg, rg_iter, search_path, search_text, MatchSpan, RgIter, RgOptions, SearchKind,
     SearchLine,

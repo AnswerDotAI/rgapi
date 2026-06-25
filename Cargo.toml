@@ -19,6 +19,8 @@ grep-regex = ">=0.1.14"
 grep-searcher = ">=0.1.16"
 ignore = ">=0.4.26"
 pyo3 = ">=0.28"
+serde = { version = "=1", features = ["derive"] }
+serde_json = "=1"
 
 [features]
 extension-module = ["pyo3/extension-module"]

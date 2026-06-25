@@ -9,9 +9,11 @@ use pyo3::types::{PyAny, PyDict};
 
 use crate::search::spans_for;
 use crate::{
-    compile_regex, find, rg_iter as rg_iter_core, search_path as search_path_core,
-    search_text as search_text_core, FindOptions, RgIter, RgOptions, SearchLine,
+    compile_regex, find, nb_search, nb_search_file, rg_iter as rg_iter_core,
+    search_path as search_path_core, search_text as search_text_core, FindOptions, NbCell,
+    NbOptions, RgIter, RgOptions, SearchLine,
 };
+use std::path::Path;
 
 #[pyclass(name = "SearchLine", eq, skip_from_py_object)]
 #[derive(Clone, PartialEq)]
@@ -446,6 +448,81 @@ fn panic_probe_py(py: Python<'_>, root: &str, walk: bool) -> PyResult<()> {
     Ok(())
 }
 
+type NbRow = (String, usize, String, String, String, String, Vec<SearchLinePy>);
+
+fn nb_row(cell: NbCell) -> NbRow {
+    (
+        cell.path,
+        cell.cell_index,
+        cell.cell_id,
+        cell.cell_type,
+        cell.kind.to_string(),
+        cell.source,
+        cell.matches.into_iter().map(SearchLinePy::from).collect(),
+    )
+}
+
+#[pyfunction(name = "nb_search")]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0))]
+fn nb_search_py(
+    pattern: String,
+    root: &str,
+    include: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
+    hidden: bool,
+    ignore: bool,
+    max_depth: Option<usize>,
+    min_depth: Option<usize>,
+    max_filesize: Option<u64>,
+    follow_links: bool,
+    same_file_system: bool,
+    path_re: Option<String>,
+    skip_path_re: Option<String>,
+    skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>,
+    case_sensitive: Option<bool>,
+    smart_case: bool,
+    cell_context: usize,
+) -> PyResult<Vec<NbRow>> {
+    let opts = NbOptions {
+        root: PathBuf::from(root),
+        pattern,
+        includes: include.unwrap_or_default(),
+        excludes: exclude.unwrap_or_default(),
+        path_re,
+        skip_path_re,
+        skip_dirs: skip_dir.unwrap_or_default(),
+        skip_dir_re,
+        hidden,
+        ignore,
+        max_depth,
+        min_depth,
+        max_filesize,
+        follow_links,
+        same_file_system,
+        case_sensitive,
+        smart_case,
+        cell_context,
+    };
+    let cells = nb_search(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(cells.into_iter().map(nb_row).collect())
+}
+
+#[pyfunction(name = "nb_search_file")]
+#[pyo3(signature = (pattern, path, display_path, case_sensitive=None, smart_case=false, cell_context=0))]
+fn nb_search_file_py(
+    pattern: &str,
+    path: &str,
+    display_path: String,
+    case_sensitive: Option<bool>,
+    smart_case: bool,
+    cell_context: usize,
+) -> PyResult<Vec<NbRow>> {
+    let cells = nb_search_file(Path::new(path), display_path, pattern, case_sensitive, smart_case, cell_context)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(cells.into_iter().map(nb_row).collect())
+}
+
 impl From<SearchLine> for SearchLinePy {
     fn from(line: SearchLine) -> Self {
         Self {
@@ -471,5 +548,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(search_text_py, m)?)?;
     m.add_function(wrap_pyfunction!(search_path_py, m)?)?;
     m.add_function(wrap_pyfunction!(panic_probe_py, m)?)?;
+    m.add_function(wrap_pyfunction!(nb_search_py, m)?)?;
+    m.add_function(wrap_pyfunction!(nb_search_file_py, m)?)?;
     Ok(())
 }

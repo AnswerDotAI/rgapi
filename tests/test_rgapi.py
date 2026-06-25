@@ -261,21 +261,19 @@ def test_nbrg_cell_context(tmp_path):
     assert kinds == {"c0": "context", "c1": "match", "c2": "context"}
 
 
-def test_nbrg_skips_bad_json_and_prefilter_parity(tmp_path):
+def test_nbrg_skips_bad_json(tmp_path):
     from rgapi import nbrg
     write_nb(tmp_path / "good.ipynb", [_cell("code", ["read_csv(x)\n"], cid="g1")])
     (tmp_path / "bad.ipynb").write_text("{not valid json")
     a = nbrg("read_csv", str(tmp_path))
-    b = nbrg("read_csv", str(tmp_path), prefilter=True)
     assert {c.cell_id for c in a} == {"g1"}
-    assert {c.cell_id for c in b} == {"g1"}
 
 
 def test_search_nb_single_and_asdict_str(tmp_path):
-    from rgapi import compile, search_nb
+    from rgapi import search_nb
     p = tmp_path / "nb.ipynb"
     write_nb(p, [_cell("code", ["def foo():\n", "    return 1\n"], cid="c1")])
-    res = search_nb(compile("foo"), p, display_path="nb.ipynb")
+    res = search_nb("foo", p, display_path="nb.ipynb")
     assert len(res) == 1
     cell = res[0]
     assert str(cell) == "nb.ipynb:c1:def foo():\\n    return 1"   # cell-oriented: whole cell, newlines escaped
@@ -285,10 +283,10 @@ def test_search_nb_single_and_asdict_str(tmp_path):
 
 
 def test_nbcell_str_truncates_and_escapes(tmp_path):
-    from rgapi import compile, search_nb
+    from rgapi import search_nb
     p = tmp_path / "nb.ipynb"
     write_nb(p, [_cell("code", ["x = '" + "a" * 500 + "'  # foo\n"], cid="c1")])
-    s = str(search_nb(compile("foo"), p, display_path="nb.ipynb")[0])
+    s = str(search_nb("foo", p, display_path="nb.ipynb")[0])
     assert "\n" not in s            # newlines escaped to a single display line
     assert s.endswith("…")          # long cell is truncated
     assert s.startswith("nb.ipynb:c1:")
