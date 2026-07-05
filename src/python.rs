@@ -16,7 +16,7 @@ use crate::{
 use std::path::Path;
 
 #[pyclass(name = "SearchLine", eq, skip_from_py_object)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 struct SearchLinePy {
     #[pyo3(get)]
     kind: String,
@@ -25,13 +25,28 @@ struct SearchLinePy {
     #[pyo3(get)]
     line_number: u64,
     #[pyo3(get)]
+    lnhash: String,
+    #[pyo3(get)]
     line: String,
     #[pyo3(get)]
     matches: Vec<(usize, usize)>,
+    display_lnhash: bool,
+}
+impl PartialEq for SearchLinePy {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.path == other.path
+            && self.line_number == other.line_number
+            && self.lnhash == other.lnhash
+            && self.line == other.line
+            && self.matches == other.matches
+    }
 }
 
 fn preview(text: &str, width: usize) -> String {
-    if text.chars().count() <= width { return text.to_string(); }
+    if text.chars().count() <= width {
+        return text.to_string();
+    }
     format!("{}…", text.chars().take(width).collect::<String>())
 }
 
@@ -42,6 +57,7 @@ impl SearchLinePy {
         dict.set_item("kind", &self.kind)?;
         dict.set_item("path", &self.path)?;
         dict.set_item("line_number", self.line_number)?;
+        dict.set_item("lnhash", &self.lnhash)?;
         dict.set_item("line", &self.line)?;
         dict.set_item("matches", self.matches.clone())?;
         Ok(dict.unbind())
@@ -49,16 +65,30 @@ impl SearchLinePy {
 
     fn __repr__(&self) -> String {
         format!(
-            "SearchLine(kind={:?}, path={:?}, line_number={}, line={:?}, matches={:?})",
-            self.kind, self.path, self.line_number, self.line, self.matches
+            "SearchLine(kind={:?}, path={:?}, line_number={}, lnhash={:?}, line={:?}, matches={:?})",
+            self.kind, self.path, self.line_number, self.lnhash, self.line, self.matches
         )
     }
     fn __str__(&self) -> String {
         let sep = if self.kind == "match" { ":" } else { "-" };
-        format!(
-            "{}{}{}{}{}",
-            self.path, sep, self.line_number, sep, preview(&self.line, 120)
-        )
+        if self.display_lnhash {
+            format!(
+                "{}{}{}{}",
+                self.path,
+                sep,
+                self.lnhash,
+                preview(&self.line, 120)
+            )
+        } else {
+            format!(
+                "{}{}{}{}{}",
+                self.path,
+                sep,
+                self.line_number,
+                sep,
+                preview(&self.line, 120)
+            )
+        }
     }
     fn _repr_pretty_(&self, p: &Bound<'_, PyAny>, cycle: bool) -> PyResult<()> {
         let text = if cycle {
@@ -73,6 +103,7 @@ impl SearchLinePy {
 #[pyclass(name = "RgIter", unsendable)]
 struct RgIterPy {
     inner: RgIter,
+    display_lnhash: bool,
 }
 #[pymethods]
 impl RgIterPy {
@@ -80,7 +111,8 @@ impl RgIterPy {
         slf
     }
     fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Option<SearchLinePy>> {
-        next_rg_line_py(py, &mut slf.inner)
+        let display_lnhash = slf.display_lnhash;
+        next_rg_line_py(py, &mut slf.inner, display_lnhash)
     }
     fn cancel(&self) {
         self.inner.cancel();
@@ -109,13 +141,17 @@ fn check_signals_or_cancel(py: Python<'_>, iter: &RgIter) -> PyResult<()> {
     Ok(())
 }
 
-fn next_rg_line_py(py: Python<'_>, iter: &mut RgIter) -> PyResult<Option<SearchLinePy>> {
+fn next_rg_line_py(
+    py: Python<'_>,
+    iter: &mut RgIter,
+    display_lnhash: bool,
+) -> PyResult<Option<SearchLinePy>> {
     loop {
         check_signals_or_cancel(py, iter)?;
         let res = py.detach(|| iter.next_timeout(Duration::from_millis(50)));
         check_signals_or_cancel(py, iter)?;
         match res {
-            Ok(Ok(line)) => return Ok(Some(SearchLinePy::from(line))),
+            Ok(Ok(line)) => return Ok(Some(search_line_py(line, display_lnhash))),
             Ok(Err(err)) => return Err(PyValueError::new_err(err.to_string())),
             Err(RecvTimeoutError::Disconnected) => return Ok(None),
             Err(RecvTimeoutError::Timeout) => continue,
@@ -123,9 +159,13 @@ fn next_rg_line_py(py: Python<'_>, iter: &mut RgIter) -> PyResult<Option<SearchL
     }
 }
 
-fn collect_rg_py(py: Python<'_>, mut iter: RgIter) -> PyResult<Vec<SearchLinePy>> {
+fn collect_rg_py(
+    py: Python<'_>,
+    mut iter: RgIter,
+    display_lnhash: bool,
+) -> PyResult<Vec<SearchLinePy>> {
     let mut res = Vec::new();
-    while let Some(line) = next_rg_line_py(py, &mut iter)? {
+    while let Some(line) = next_rg_line_py(py, &mut iter, display_lnhash)? {
         res.push(line);
     }
     Ok(res)
@@ -331,7 +371,7 @@ fn search_path_py(
 }
 
 #[pyfunction(name = "rg")]
-#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0))]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false))]
 fn rg_py(
     py: Python<'_>,
     pattern: String,
@@ -353,6 +393,7 @@ fn rg_py(
     smart_case: bool,
     before_context: usize,
     after_context: usize,
+    lnhash: bool,
 ) -> PyResult<Vec<SearchLinePy>> {
     let opts = RgOptions {
         root: PathBuf::from(root),
@@ -377,10 +418,10 @@ fn rg_py(
         panic_probe: false,
     };
     let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
-    collect_rg_py(py, iter)
+    collect_rg_py(py, iter, lnhash)
 }
 #[pyfunction(name = "rg_iter")]
-#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0))]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false))]
 fn rg_iter_py(
     pattern: String,
     root: &str,
@@ -401,6 +442,7 @@ fn rg_iter_py(
     smart_case: bool,
     before_context: usize,
     after_context: usize,
+    lnhash: bool,
 ) -> PyResult<RgIterPy> {
     let opts = RgOptions {
         root: PathBuf::from(root),
@@ -425,7 +467,10 @@ fn rg_iter_py(
         panic_probe: false,
     };
     rg_iter_core(&opts)
-        .map(|inner| RgIterPy { inner })
+        .map(|inner| RgIterPy {
+            inner,
+            display_lnhash: lnhash,
+        })
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
@@ -448,12 +493,20 @@ fn panic_probe_py(py: Python<'_>, root: &str, walk: bool) -> PyResult<()> {
             ..RgOptions::default()
         };
         let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
-        collect_rg_py(py, iter)?;
+        collect_rg_py(py, iter, false)?;
     }
     Ok(())
 }
 
-type NbRow = (String, usize, String, String, String, String, Vec<SearchLinePy>);
+type NbRow = (
+    String,
+    usize,
+    String,
+    String,
+    String,
+    String,
+    Vec<SearchLinePy>,
+);
 
 fn nb_row(cell: NbCell) -> NbRow {
     (
@@ -523,8 +576,15 @@ fn nb_search_file_py(
     smart_case: bool,
     cell_context: usize,
 ) -> PyResult<Vec<NbRow>> {
-    let cells = nb_search_file(Path::new(path), display_path, pattern, case_sensitive, smart_case, cell_context)
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let cells = nb_search_file(
+        Path::new(path),
+        display_path,
+        pattern,
+        case_sensitive,
+        smart_case,
+        cell_context,
+    )
+    .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(cells.into_iter().map(nb_row).collect())
 }
 
@@ -534,9 +594,18 @@ impl From<SearchLine> for SearchLinePy {
             kind: line.kind.as_str().to_string(),
             path: line.path,
             line_number: line.line_number,
+            lnhash: line.lnhash,
             line: line.line,
             matches: line.matches.into_iter().map(|m| (m.start, m.end)).collect(),
+            display_lnhash: false,
         }
+    }
+}
+
+fn search_line_py(line: SearchLine, display_lnhash: bool) -> SearchLinePy {
+    SearchLinePy {
+        display_lnhash,
+        ..SearchLinePy::from(line)
     }
 }
 

@@ -122,10 +122,21 @@ def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
     try: rg("TODO", str(tmp_path), paths=True, count=True)
     except AssertionError as e: assert "mutually exclusive" in str(e)
     else: assert False
-    assert repr(res[1]) == 'SearchLine(kind="match", path="src/app.py", line_number=2, line="TODO here", matches=[(0, 4)])'
+    addr = res[1].lnhash.split("|")
+    assert addr[0] == "2" and len(addr[1]) == 4 and addr[2:] == [""]
+    assert int(addr[1], 16) >= 0
+    expected = (f'SearchLine(kind="match", path="src/app.py", line_number=2, lnhash="{res[1].lnhash}", '
+        'line="TODO here", matches=[(0, 4)])')
+    assert repr(res[1]) == expected
     assert str(res[0]) == "src/app.py-1-alpha"
     assert str(res[1]) == "src/app.py:2:TODO here"
     assert str(res) == "src/app.py-1-alpha\nsrc/app.py:2:TODO here\nsrc/app.py-3-omega"
+    hashed = rg("TODO", str(tmp_path), context=1, lnhash=True)
+    assert hashed == res
+    assert str(hashed[0]) == f"src/app.py-{hashed[0].lnhash}alpha"
+    assert str(hashed[1]) == f"src/app.py:{hashed[1].lnhash}TODO here"
+    assert str(hashed) == "\n".join(str(row) for row in hashed)
+    assert list(rg_iter("TODO", str(tmp_path), context=1, lnhash=True)) == hashed
     p = Pretty()
     res._repr_pretty_(p, False)
     assert p.texts == [str(res)]
@@ -202,15 +213,16 @@ def test_direct_regex_and_search_apis(tmp_path):
     assert isinstance(path_res, SearchResults)
     assert [(r.kind, r.path, r.line_number, r.line, r.matches) for r in path_res] == [
         ("match", "display.py", 2, "TODO here", [(0, 4)])]
-    assert path_res[0].asdict() == dict(kind="match", path="display.py", line_number=2, line="TODO here", matches=[(0, 4)])
+    assert path_res[0].asdict() == dict(kind="match", path="display.py", line_number=2,
+        lnhash=path_res[0].lnhash, line="TODO here", matches=[(0, 4)])
 
 
 def write_nb(path, cells):
-    nb = {"cells": cells, "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
+    nb = dict(cells=cells, metadata={}, nbformat=4, nbformat_minor=5)
     path.write_text(json.dumps(nb))
 
 def _cell(cell_type, source, cid=None, outputs=None):
-    c = {"cell_type": cell_type, "metadata": {}, "source": source}
+    c = dict(cell_type=cell_type, metadata={}, source=source)
     if cell_type == "code":
         c["execution_count"] = None
         c["outputs"] = outputs or []
@@ -222,9 +234,9 @@ def test_nbrg_source_only_with_cells(tmp_path):
     from rgapi import nbrg
     write_nb(tmp_path / "nb.ipynb", [
         _cell("code", ["import os\n", "def foo():\n", "    return 1\n"], cid="c1",
-              outputs=[{"output_type": "stream", "name": "stdout", "text": ["foo ran\n"]}]),
+            outputs=[dict(output_type="stream", name="stdout", text=["foo ran\n"])]),
         _cell("code", ["print('hi')\n"], cid="c2",
-              outputs=[{"output_type": "stream", "name": "stdout", "text": ["foo in output\n"]}]),
+            outputs=[dict(output_type="stream", name="stdout", text=["foo in output\n"])]),
         _cell("markdown", ["# Title\n", "use foo here\n"], cid="m1"),
     ])
     res = nbrg("foo", str(tmp_path))
@@ -273,7 +285,7 @@ def test_nbrg_cell_context(tmp_path):
     ])
     res = nbrg("target", str(tmp_path), cell_context=1)
     kinds = {c.cell_id: c.kind for c in res}
-    assert kinds == {"c0": "context", "c1": "match", "c2": "context"}
+    assert kinds == dict(c0="context", c1="match", c2="context")
 
 
 def test_file_as_root_searches_just_that_file(tmp_path):

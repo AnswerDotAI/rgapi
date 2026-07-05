@@ -59,13 +59,14 @@ pip install rgapi
 kind         'match', 'before', 'after', or 'context'
 path         path relative to root
 line_number  1-based line number
+lnhash       exhash-style `lineno|hash|` address for the line
 line         line text without the trailing newline
 matches      list of (start, end) byte offsets for match rows
 ```
 
 `rg`, `search_text`, and `search_path` return `SearchResults` by default, a list subclass whose `str()` and notebook pretty display are rg-style multiline text. `rg_iter` yields rows lazily.
 
-`SearchLine` has a structured `repr`, an rg-style `str` (the `line` is truncated to 120 chars with a trailing `…` for display; `repr` and `asdict()` keep the full line), and `SearchLine.asdict()` returns row fields as a plain Python dict. `rg(..., paths=True)` returns unique matched paths, and `rg(..., count=True)` returns the total number of match spans. `paths` and `count` cannot both be set.
+`SearchLine` has a structured `repr`, an rg-style `str` (the `line` is truncated to 120 chars with a trailing `…` for display; `repr` and `asdict()` keep the full line), and `SearchLine.asdict()` returns row fields as a plain Python dict. Pass `rg(..., lnhash=True)` or `rg_iter(..., lnhash=True)` to show `lnhash` addresses instead of line numbers in row display while keeping `line_number` available. `rg(..., paths=True)` returns unique matched paths, and `rg(..., count=True)` returns the total number of match spans. `paths` and `count` cannot both be set.
 
 `before_context`, `after_context`, and `context` are like `rg -B`, `rg -A`, and `rg -C`. Files containing NUL bytes or invalid UTF-8 are skipped.
 
@@ -111,4 +112,3 @@ Notebook walking, parsing, and matching all happen in parallel in Rust, in the s
 | 6 x 2 MB files, 2 matches | 6.54 ms | 1.44 ms |
 | 800 x 1.5 KB files, 2 matches | 13.90 ms | 10.94 ms |
 | tiny dir, repeated 30x | 5.92 ms | 2.14 ms |
-

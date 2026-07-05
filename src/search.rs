@@ -1,3 +1,5 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -14,7 +16,9 @@ use grep_searcher::{
 };
 use ignore::{DirEntry, WalkBuilder, WalkState};
 
-use crate::walk::{configure_walker, filter_dirs, normalize_root, rel_path, resolve_root, PathFilters};
+use crate::walk::{
+    configure_walker, filter_dirs, normalize_root, rel_path, resolve_root, PathFilters,
+};
 use crate::RgApiError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +49,7 @@ pub struct SearchLine {
     pub kind: SearchKind,
     pub path: String,
     pub line_number: u64,
+    pub lnhash: String,
     pub line: String,
     pub matches: Vec<MatchSpan>,
 }
@@ -105,8 +110,13 @@ pub fn rg(opts: &RgOptions) -> Result<Vec<SearchLine>, RgApiError> {
 }
 
 pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
-    let (root_in, includes, max_depth, ignore, hidden) =
-        resolve_root(&opts.root, &opts.includes, opts.max_depth, opts.ignore, opts.hidden);
+    let (root_in, includes, max_depth, ignore, hidden) = resolve_root(
+        &opts.root,
+        &opts.includes,
+        opts.max_depth,
+        opts.ignore,
+        opts.hidden,
+    );
     let root = normalize_root(&root_in)?;
     let filters = Arc::new(PathFilters::new(
         &includes,
@@ -311,6 +321,16 @@ pub fn compile_regex(
         .map_err(|e| RgApiError::new(e.to_string()))
 }
 
+fn line_hash_u16(line: &str) -> u16 {
+    let mut h = DefaultHasher::new();
+    line.hash(&mut h);
+    (h.finish() & 0xffff) as u16
+}
+
+fn format_lnhash(lineno: u64, line: &str) -> String {
+    format!("{}|{:04x}|", lineno, line_hash_u16(line))
+}
+
 pub fn search_path(
     path: &Path,
     display_path: String,
@@ -426,11 +446,13 @@ impl Sink for CollectSink<'_> {
             return Ok(false);
         }
         let line = bytes_to_line(mat.bytes())?;
+        let line_number = mat.line_number().unwrap_or(0);
         let spans = spans_for(&self.matcher, mat.bytes())?;
         self.lines.push(SearchLine {
             kind: SearchKind::Match,
             path: self.path.clone(),
-            line_number: mat.line_number().unwrap_or(0),
+            line_number,
+            lnhash: format_lnhash(line_number, &line),
             line,
             matches: spans,
         });
@@ -450,11 +472,14 @@ impl Sink for CollectSink<'_> {
             SinkContextKind::After => SearchKind::After,
             SinkContextKind::Other => SearchKind::Context,
         };
+        let line = bytes_to_line(ctx.bytes())?;
+        let line_number = ctx.line_number().unwrap_or(0);
         self.lines.push(SearchLine {
             kind,
             path: self.path.clone(),
-            line_number: ctx.line_number().unwrap_or(0),
-            line: bytes_to_line(ctx.bytes())?,
+            line_number,
+            lnhash: format_lnhash(line_number, &line),
+            line,
             matches: Vec::new(),
         });
         Ok(!self.cancelled())

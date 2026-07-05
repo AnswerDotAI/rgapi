@@ -8,7 +8,9 @@ use ignore::{DirEntry, WalkBuilder, WalkState};
 use serde::Deserialize;
 
 use crate::search::{compile_regex, search_text, SearchLine};
-use crate::walk::{configure_walker, filter_dirs, normalize_root, rel_path, resolve_root, PathFilters};
+use crate::walk::{
+    configure_walker, filter_dirs, normalize_root, rel_path, resolve_root, PathFilters,
+};
 use crate::RgApiError;
 
 #[derive(Debug, Clone)]
@@ -112,7 +114,11 @@ fn process_file(
         if !hits.is_empty() {
             matched.push((i, hits));
         }
-        info.push((cell.id_string(i), cell.cell_type.clone().unwrap_or_default(), src));
+        info.push((
+            cell.id_string(i),
+            cell.cell_type.clone().unwrap_or_default(),
+            src,
+        ));
     }
     if matched.is_empty() {
         return Ok(Vec::new());
@@ -196,8 +202,13 @@ fn nb_entry(
 }
 
 pub fn nb_search(opts: &NbOptions) -> Result<Vec<NbCell>, RgApiError> {
-    let (root_in, includes, max_depth, ignore, hidden) =
-        resolve_root(&opts.root, &opts.includes, opts.max_depth, opts.ignore, opts.hidden);
+    let (root_in, includes, max_depth, ignore, hidden) = resolve_root(
+        &opts.root,
+        &opts.includes,
+        opts.max_depth,
+        opts.ignore,
+        opts.hidden,
+    );
     let root = normalize_root(&root_in)?;
     let filters = Arc::new(PathFilters::new(
         &includes,

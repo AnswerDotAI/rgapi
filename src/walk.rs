@@ -57,8 +57,13 @@ impl Default for FindOptions {
 }
 
 pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
-    let (root_in, includes, max_depth, ignore, hidden) =
-        resolve_root(&opts.root, &opts.includes, opts.max_depth, opts.ignore, opts.hidden);
+    let (root_in, includes, max_depth, ignore, hidden) = resolve_root(
+        &opts.root,
+        &opts.includes,
+        opts.max_depth,
+        opts.ignore,
+        opts.hidden,
+    );
     let root = normalize_root(&root_in)?;
     let filters = Arc::new(PathFilters::new(
         &includes,
@@ -175,10 +180,22 @@ pub(crate) fn resolve_root(
                 Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
                 _ => PathBuf::from("."),
             };
-            return (parent, vec![globset::escape(&name.to_string_lossy())], Some(1), false, true);
+            return (
+                parent,
+                vec![globset::escape(&name.to_string_lossy())],
+                Some(1),
+                false,
+                true,
+            );
         }
     }
-    (root.to_path_buf(), includes.to_vec(), max_depth, ignore, hidden)
+    (
+        root.to_path_buf(),
+        includes.to_vec(),
+        max_depth,
+        ignore,
+        hidden,
+    )
 }
 
 pub(crate) fn normalize_root(path: &Path) -> Result<PathBuf, RgApiError> {

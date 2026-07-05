@@ -121,9 +121,10 @@ def rg(
     after_context:int=0, # Lines of context after each match, like `rg -A`
     context:int=0, # Sets both before and after context, like `rg -C`
     paths:bool=False, # Return unique matched paths instead of rows
-    count:bool=False # Return total match span count instead of rows
+    count:bool=False, # Return total match span count instead of rows
+    lnhash:bool=False # Show `lineno|hash|` addresses instead of line numbers in row display
 ):
-    "Search files and return `SearchResults`, matched paths, or a count."
+    "Search files and return `SearchResults`, matched paths, or a count; `lnhash=True` shows exhash-style addresses."
     assert not (paths and count), "paths and count are mutually exclusive"
     args = _rg_args(pattern, root, glob, include, exclude, ext, hidden, ignore, max_depth, min_depth, max_filesize,
         follow_links, same_file_system, path_re, skip_path_re, skip_dir, skip_dir_re, case_sensitive, smart_case,
@@ -136,7 +137,7 @@ def rg(
             res.append(row.path)
         return res
     if count: return sum(len(row.matches) for row in _core.rg_iter(*args) if row.kind == "match")
-    return SearchResults(_core.rg(*args))
+    return SearchResults(_core.rg(*args, lnhash))
 
 
 def rg_iter(
@@ -161,13 +162,14 @@ def rg_iter(
     smart_case:bool=False, # Match `rg --smart-case` behavior
     before_context:int=0, # Lines of context before each match, like `rg -B`
     after_context:int=0, # Lines of context after each match, like `rg -A`
-    context:int=0 # Sets both before and after context, like `rg -C`
+    context:int=0, # Sets both before and after context, like `rg -C`
+    lnhash:bool=False # Show `lineno|hash|` addresses instead of line numbers in row display
 ) -> RgIter:
-    "Search files lazily, yielding `SearchLine` rows."
+    "Search files lazily, yielding `SearchLine` rows; `lnhash=True` shows exhash-style addresses."
     args = _rg_args(pattern, root, glob, include, exclude, ext, hidden, ignore, max_depth, min_depth, max_filesize,
         follow_links, same_file_system, path_re, skip_path_re, skip_dir, skip_dir_re, case_sensitive, smart_case,
         before_context, after_context, context)
-    return _core.rg_iter(*args)
+    return _core.rg_iter(*args, lnhash)
 
 
 def search_text(
