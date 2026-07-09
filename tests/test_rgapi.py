@@ -336,3 +336,30 @@ def test_nbcell_str_truncates_and_escapes(tmp_path):
     assert "\n" not in s            # newlines escaped to a single display line
     assert s.endswith("…")          # long cell is truncated
     assert s.startswith("nb.ipynb:c1:")
+
+
+def test_max_results_and_count(tmp_path):
+    from rgapi import nbrg
+    make_tree(tmp_path)
+    (tmp_path / "src" / "more.py").write_text("TODO one\nplain\nTODO two\n")
+    res = rg("TODO", str(tmp_path), max_results=2)
+    assert [r.kind for r in res] == ["match", "match"]
+    assert len(rg("TODO", str(tmp_path))) == 3
+    # context lines ride along with kept matches only
+    ctx = rg("TODO", str(tmp_path), context=1, max_results=1)
+    assert [r.kind for r in ctx].count("match") == 1
+    assert rg("TODO", str(tmp_path), paths=True, max_results=1) == ["src/app.py"]
+    try: rg("TODO", str(tmp_path), count=True, max_results=1)
+    except AssertionError as e: assert "mutually exclusive" in str(e)
+    else: assert False
+
+    write_nb(tmp_path / "nb.ipynb", [
+        _cell("code", ["foo = 1\n"], cid="c1"),
+        _cell("code", ["foo = 2\n"], cid="c2"),
+        _cell("code", ["foo = 3\n"], cid="c3"),
+    ])
+    assert [c.cell_id for c in nbrg("foo", str(tmp_path), max_results=2)] == ["c1", "c2"]
+    assert nbrg("foo", str(tmp_path), count=True) == 3
+    try: nbrg("foo", str(tmp_path), max_reslts=2)
+    except TypeError as e: assert "max_reslts" in str(e)
+    else: assert False

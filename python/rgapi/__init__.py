@@ -1,5 +1,6 @@
 from os import fspath
 from pathlib import Path
+from fastcore.meta import delegates
 
 from . import _core
 
@@ -61,60 +62,61 @@ def walk(
         same_file_system, path_re, skip_path_re, _listify(skip_dir), skip_dir_re, files, dirs)
 
 
+def _walk_args(
+    glob=None, # Include glob or globs; alias for `include`
+    include=None, # Include glob or globs, e.g. `*.py`
+    exclude=None, # Exclude glob or globs, e.g. `test_*.py`
+    ext=None, # Extension or extensions to include, without needing `*.`
+    hidden:bool=False, # Include hidden files and directories
+    ignore:bool=True, # Respect `.gitignore` and other ignore files
+    max_depth:int|None=None, # Maximum directory depth to descend
+    min_depth:int|None=None, # Minimum depth for returned/searched paths
+    max_filesize:int|None=None, # Skip files larger than this many bytes
+    follow_links:bool=False, # Follow symbolic links while walking
+    same_file_system:bool=False, # Do not cross filesystem boundaries
+    path_re:str|None=None, # Regex that relative paths must match
+    skip_path_re:str|None=None, # Regex for relative paths to skip
+    skip_dir=None, # Directory glob or globs to prune
+    skip_dir_re:str|None=None, # Directory regex used to prune traversal
+):
+    "Walk/filter positional tail for `_core` calls; delegators pass their `**kwargs` here whole"
+    include, exclude = _filters(glob, include, exclude, ext)
+    return (include, exclude, hidden, ignore, max_depth, min_depth, max_filesize,
+        follow_links, same_file_system, path_re, skip_path_re, _listify(skip_dir), skip_dir_re)
+
+@delegates(_walk_args)
 def fd(
     root:str|Path=".", # Directory to walk (expands `~`)
     pattern:str|None=None, # Substring that relative paths must contain
-    glob=None, # Include glob or globs; alias for `include`
-    include=None, # Include glob or globs, e.g. `*.py`
-    exclude=None, # Exclude glob or globs, e.g. `test_*.py`
-    ext=None, # Extension or extensions to include, without needing `*.`
-    hidden:bool=False, # Include hidden files and directories
-    ignore:bool=True, # Respect `.gitignore` and other ignore files
-    max_depth:int|None=None, # Maximum directory depth to descend
-    min_depth:int|None=None, # Minimum depth for returned paths
-    max_filesize:int|None=None, # Skip files larger than this many bytes
-    follow_links:bool=False, # Follow symbolic links while walking
-    same_file_system:bool=False, # Do not cross filesystem boundaries
-    path_re:str|None=None, # Regex that returned relative paths must match
-    skip_path_re:str|None=None, # Regex for relative paths to skip
-    skip_dir=None, # Directory glob or globs to prune
-    skip_dir_re:str|None=None, # Directory regex used to prune traversal
     files:bool=True, # Include files in results
-    dirs:bool=False # Include directories in results
+    dirs:bool=False, # Include directories in results
+    **kwargs
 ) -> list[str]:
     "Find paths with fd-style filters and gitignore support."
-    include, exclude = _filters(glob, include, exclude, ext)
-    return _core.find(_fs_path(root), pattern, include, exclude, hidden, ignore, max_depth, min_depth, max_filesize,
-        follow_links, same_file_system, path_re, skip_path_re, _listify(skip_dir), skip_dir_re, files, dirs)
+    return _core.find(_fs_path(root), pattern, *_walk_args(**kwargs), files, dirs)
 
 
-def _rg_args(pattern, root, glob, include, exclude, ext, hidden, ignore, max_depth, min_depth, max_filesize,
-    follow_links, same_file_system, path_re, skip_path_re, skip_dir, skip_dir_re, case_sensitive, smart_case,
-    before_context, after_context, context):
-    include, exclude = _filters(glob, include, exclude, ext)
-    before_context, after_context = _context(context, before_context, after_context)
-    return (pattern, _fs_path(root), include, exclude, hidden, ignore, max_depth, min_depth, max_filesize, follow_links, same_file_system,
-        path_re, skip_path_re, _listify(skip_dir), skip_dir_re, case_sensitive, smart_case, before_context, after_context)
+
+def _cap_rows(rows, n):
+    "First `n` match rows from `rows`, with their context rows"
+    res,seen,pending = [],0,[]
+    for row in rows:
+        if row.kind == "match":
+            seen += 1
+            if seen > n: break
+            res += pending
+            pending = []
+            res.append(row)
+        elif row.kind == "before": pending.append(row)
+        else: res.append(row)
+    return res
 
 
+
+@delegates(_walk_args)
 def rg(
     pattern:str, # Regex pattern to search for
     root:str|Path=".", # Directory to search (expands `~`)
-    glob=None, # Include glob or globs; alias for `include`
-    include=None, # Include glob or globs, e.g. `*.py`
-    exclude=None, # Exclude glob or globs, e.g. `test_*.py`
-    ext=None, # Extension or extensions to include, without needing `*.`
-    hidden:bool=False, # Include hidden files and directories
-    ignore:bool=True, # Respect `.gitignore` and other ignore files
-    max_depth:int|None=None, # Maximum directory depth to descend
-    min_depth:int|None=None, # Minimum depth for returned/searched files
-    max_filesize:int|None=None, # Skip files larger than this many bytes
-    follow_links:bool=False, # Follow symbolic links while walking
-    same_file_system:bool=False, # Do not cross filesystem boundaries
-    path_re:str|None=None, # Regex that searched relative paths must match
-    skip_path_re:str|None=None, # Regex for relative paths to skip
-    skip_dir=None, # Directory glob or globs to prune
-    skip_dir_re:str|None=None, # Directory regex used to prune traversal
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     before_context:int=0, # Lines of context before each match, like `rg -B`
@@ -122,54 +124,45 @@ def rg(
     context:int=0, # Sets both before and after context, like `rg -C`
     paths:bool=False, # Return unique matched paths instead of rows
     count:bool=False, # Return total match span count instead of rows
-    lnhash:bool=False # Show `lineno|hash|` addresses instead of line numbers in row display
+    max_results:int|None=None, # Stop after this many matching rows; context rows of kept matches are included
+    lnhash:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
+    **kwargs
 ):
     "Search files and return `SearchResults`, matched paths, or a count; `lnhash=True` shows exhash-style addresses."
     assert not (paths and count), "paths and count are mutually exclusive"
-    args = _rg_args(pattern, root, glob, include, exclude, ext, hidden, ignore, max_depth, min_depth, max_filesize,
-        follow_links, same_file_system, path_re, skip_path_re, skip_dir, skip_dir_re, case_sensitive, smart_case,
-        before_context, after_context, context)
+    assert not (count and max_results), "count and max_results are mutually exclusive"
+    before_context, after_context = _context(context, before_context, after_context)
+    args = (pattern, _fs_path(root), *_walk_args(**kwargs), case_sensitive, smart_case, before_context, after_context)
     if paths:
         seen, res = set(), []
         for row in _core.rg_iter(*args):
             if row.kind != "match" or row.path in seen: continue
             seen.add(row.path)
             res.append(row.path)
+            if len(res) == max_results: break
         return res
     if count: return sum(len(row.matches) for row in _core.rg_iter(*args) if row.kind == "match")
-    return SearchResults(_core.rg(*args, lnhash))
+    rows = _core.rg(*args, lnhash)
+    if max_results is not None: rows = _cap_rows(rows, max_results)
+    return SearchResults(rows)
 
 
+@delegates(_walk_args)
 def rg_iter(
     pattern:str, # Regex pattern to search for
     root:str|Path=".", # Directory to search (expands `~`)
-    glob=None, # Include glob or globs; alias for `include`
-    include=None, # Include glob or globs, e.g. `*.py`
-    exclude=None, # Exclude glob or globs, e.g. `test_*.py`
-    ext=None, # Extension or extensions to include, without needing `*.`
-    hidden:bool=False, # Include hidden files and directories
-    ignore:bool=True, # Respect `.gitignore` and other ignore files
-    max_depth:int|None=None, # Maximum directory depth to descend
-    min_depth:int|None=None, # Minimum depth for returned/searched files
-    max_filesize:int|None=None, # Skip files larger than this many bytes
-    follow_links:bool=False, # Follow symbolic links while walking
-    same_file_system:bool=False, # Do not cross filesystem boundaries
-    path_re:str|None=None, # Regex that searched relative paths must match
-    skip_path_re:str|None=None, # Regex for relative paths to skip
-    skip_dir=None, # Directory glob or globs to prune
-    skip_dir_re:str|None=None, # Directory regex used to prune traversal
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     before_context:int=0, # Lines of context before each match, like `rg -B`
     after_context:int=0, # Lines of context after each match, like `rg -A`
     context:int=0, # Sets both before and after context, like `rg -C`
-    lnhash:bool=False # Show `lineno|hash|` addresses instead of line numbers in row display
+    lnhash:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
+    **kwargs
 ) -> RgIter:
     "Search files lazily, yielding `SearchLine` rows; `lnhash=True` shows exhash-style addresses."
-    args = _rg_args(pattern, root, glob, include, exclude, ext, hidden, ignore, max_depth, min_depth, max_filesize,
-        follow_links, same_file_system, path_re, skip_path_re, skip_dir, skip_dir_re, case_sensitive, smart_case,
-        before_context, after_context, context)
-    return _core.rg_iter(*args, lnhash)
+    before_context, after_context = _context(context, before_context, after_context)
+    return _core.rg_iter(pattern, _fs_path(root), *_walk_args(**kwargs),
+        case_sensitive, smart_case, before_context, after_context, lnhash)
 
 
 def search_text(

@@ -3,7 +3,7 @@
 from pathlib import Path
 from fastcore.meta import delegates
 
-from . import _core, fd, _filters, _fs_path, _listify
+from . import _core, _walk_args, _fs_path
 
 
 def _preview(text, width=120):
@@ -60,23 +60,23 @@ def search_nb(
     return res
 
 
-@delegates(fd, but=["ext", "files", "dirs"])
+@delegates(_walk_args, but=["ext"])
 def nbrg(
-    pattern:str,                  # Regex pattern to search for
-    root:str=".",                 # Directory to search (expands `~`)
-    cell_context:int=0,           # Cells of context to include before/after each matching cell
-    case_sensitive:bool|None=None,# True/False forces case; None allows `smart_case`
-    smart_case:bool=False,        # Match `rg --smart-case` behavior
+    pattern:str, # Regex pattern to search for
+    root:str=".", # Directory to search (expands `~`)
+    cell_context:int=0, # Cells of context to include before/after each matching cell
+    case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
+    smart_case:bool=False, # Match `rg --smart-case` behavior
+    max_results:int|None=None, # Return at most this many cells
+    count:bool=False, # Return the number of matching cells instead of results
     **kwargs
 ) -> NbResults:
     "Search `.ipynb` cell sources under `root` in parallel, returning matched cells."
-    includes, excludes = _filters(kwargs.pop("glob", None), kwargs.pop("include", None), kwargs.pop("exclude", None), "ipynb")
-    rows = _core.nb_search(pattern, _fs_path(root), includes, excludes,
-        kwargs.pop("hidden", False), kwargs.pop("ignore", True), kwargs.pop("max_depth", None),
-        kwargs.pop("min_depth", None), kwargs.pop("max_filesize", None), kwargs.pop("follow_links", False),
-        kwargs.pop("same_file_system", False), kwargs.pop("path_re", None), kwargs.pop("skip_path_re", None),
-        _listify(kwargs.pop("skip_dir", None)), kwargs.pop("skip_dir_re", None),
+    assert not (count and max_results), "count and max_results are mutually exclusive"
+    rows = _core.nb_search(pattern, _fs_path(root), *_walk_args(ext="ipynb", **kwargs),
         case_sensitive, smart_case, cell_context)
     res = NbResults(_rows_to_cells(rows))
     res.sort(key=lambda c: (c.path, c.cell_index))
+    if count: return len(res)
+    if max_results is not None: res = NbResults(res[:max_results])
     return res
