@@ -1,24 +1,20 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc::{self, Receiver, RecvTimeoutError, Sender},
+    mpsc::SyncSender,
     Arc,
 };
-use std::time::Duration;
 
 use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::{
     BinaryDetection, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkError, SinkMatch,
 };
-use ignore::{DirEntry, WalkBuilder, WalkState};
+use ignore::{DirEntry, WalkState};
 
-use crate::walk::{
-    configure_walker, filter_dirs, normalize_root, rel_path, resolve_root, PathFilters,
-};
+use crate::walk::{normalize_root, rel_path, resolve_root, spawn_walk, PathFilters, StreamIter};
 use crate::RgApiError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,108 +123,37 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
         opts.skip_dir_re.as_deref(),
     )?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case)?;
-    let mut opts = opts.clone();
-    (opts.ignore, opts.hidden, opts.max_depth) = (ignore, hidden, max_depth);
-    let cancel = Arc::new(AtomicBool::new(false));
-    let worker_cancel = cancel.clone();
-    let (tx, rx) = mpsc::channel();
-    let worker = std::thread::spawn(move || {
-        run_parallel_search(root, opts, filters, matcher, tx, worker_cancel)
-    });
-    Ok(RgIter {
-        rx,
-        cancel,
-        _worker: worker,
-    })
-}
-
-pub struct RgIter {
-    rx: Receiver<Result<SearchLine, RgApiError>>,
-    cancel: Arc<AtomicBool>,
-    _worker: std::thread::JoinHandle<()>,
-}
-
-impl RgIter {
-    pub fn cancel(&self) {
-        self.cancel.store(true, Ordering::Relaxed);
-    }
-
-    pub fn next_timeout(
-        &mut self,
-        timeout: Duration,
-    ) -> Result<Result<SearchLine, RgApiError>, RecvTimeoutError> {
-        self.rx.recv_timeout(timeout)
-    }
-}
-
-impl Iterator for RgIter {
-    type Item = Result<SearchLine, RgApiError>;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.rx.recv().ok()
-    }
-}
-impl Drop for RgIter {
-    fn drop(&mut self) {
-        self.cancel();
-    }
-}
-
-fn run_parallel_search(
-    root: PathBuf,
-    opts: RgOptions,
-    filters: Arc<PathFilters>,
-    matcher: RegexMatcher,
-    tx: Sender<Result<SearchLine, RgApiError>>,
-    cancel: Arc<AtomicBool>,
-) {
-    let mut walker = WalkBuilder::new(&root);
-    configure_walker(
-        &mut walker,
-        opts.ignore,
-        opts.hidden,
-        opts.max_depth,
+    let (before_context, after_context, panic_probe) =
+        (opts.before_context, opts.after_context, opts.panic_probe);
+    Ok(spawn_walk(
+        root,
+        ignore,
+        hidden,
+        max_depth,
         opts.min_depth,
         opts.max_filesize,
         opts.follow_links,
         opts.same_file_system,
-    );
-    filter_dirs(&mut walker, &root, filters.clone());
-    let before_context = opts.before_context;
-    let after_context = opts.after_context;
-    let panic_probe = opts.panic_probe;
-    walker.build_parallel().run(|| {
-        let tx = tx.clone();
-        let root = root.clone();
-        let filters = filters.clone();
-        let matcher = matcher.clone();
-        let before_context = before_context;
-        let after_context = after_context;
-        let cancel = cancel.clone();
-        Box::new(move |entry| {
-            catch_unwind(AssertUnwindSafe(|| {
-                if panic_probe {
-                    panic!("rgapi: deliberate panic for tests (panic_probe)");
-                }
-                search_entry(
-                    entry,
-                    &root,
-                    &filters,
-                    &matcher,
-                    before_context,
-                    after_context,
-                    &tx,
-                    &cancel,
-                )
-            }))
-            .unwrap_or_else(|_| {
-                let _ = tx.send(Err(RgApiError::new(
-                    "internal error during search (this is a bug, please report it)",
-                )));
-                WalkState::Quit
-            })
-        })
-    });
+        filters,
+        move |dent, root, filters, tx, cancel| {
+            if panic_probe {
+                panic!("rgapi: deliberate panic for tests (panic_probe)");
+            }
+            search_entry(
+                dent,
+                root,
+                filters,
+                &matcher,
+                before_context,
+                after_context,
+                tx,
+                cancel,
+            )
+        },
+    ))
 }
+
+pub type RgIter = StreamIter<SearchLine>;
 
 fn search_entry(
     entry: Result<DirEntry, ignore::Error>,
@@ -237,7 +162,7 @@ fn search_entry(
     matcher: &RegexMatcher,
     before_context: usize,
     after_context: usize,
-    tx: &Sender<Result<SearchLine, RgApiError>>,
+    tx: &SyncSender<Result<SearchLine, RgApiError>>,
     cancel: &Arc<AtomicBool>,
 ) -> WalkState {
     if is_cancelled(cancel) {
@@ -288,7 +213,10 @@ fn is_cancelled(cancel: &Arc<AtomicBool>) -> bool {
     cancel.load(Ordering::Relaxed)
 }
 
-fn send_search_error(tx: &Sender<Result<SearchLine, RgApiError>>, err: RgApiError) -> WalkState {
+fn send_search_error(
+    tx: &SyncSender<Result<SearchLine, RgApiError>>,
+    err: RgApiError,
+) -> WalkState {
     let _ = tx.send(Err(err));
     WalkState::Quit
 }

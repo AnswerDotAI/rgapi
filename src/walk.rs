@@ -1,5 +1,6 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -57,6 +58,13 @@ impl Default for FindOptions {
 }
 
 pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
+    find_cancelable(opts, None)
+}
+
+pub fn find_cancelable(
+    opts: &FindOptions,
+    cancel: Option<&Arc<AtomicBool>>,
+) -> Result<Vec<String>, RgApiError> {
     let (root_in, includes, max_depth, ignore, hidden) = resolve_root(
         &opts.root,
         &opts.includes,
@@ -95,7 +103,13 @@ pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
         let root = root.clone();
         let filters = filters.clone();
         let pattern = pattern.clone();
+        let cancel = cancel.cloned();
         Box::new(move |entry| {
+            if let Some(c) = &cancel {
+                if c.load(Ordering::Relaxed) {
+                    return WalkState::Quit;
+                }
+            }
             let outcome = catch_unwind(AssertUnwindSafe(|| {
                 if panic_probe {
                     panic!("rgapi: deliberate panic for tests (panic_probe)");
@@ -124,6 +138,114 @@ pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
     });
     drop(tx);
     rx.into_iter().collect()
+}
+
+pub struct StreamIter<T> {
+    rx: mpsc::Receiver<Result<T, RgApiError>>,
+    cancel: Arc<AtomicBool>,
+    _worker: std::thread::JoinHandle<()>,
+}
+
+impl<T> StreamIter<T> {
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        self.cancel.clone()
+    }
+
+    pub fn next_timeout(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> Result<Result<T, RgApiError>, mpsc::RecvTimeoutError> {
+        self.rx.recv_timeout(timeout)
+    }
+}
+
+impl<T> Iterator for StreamIter<T> {
+    type Item = Result<T, RgApiError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.rx.recv().ok()
+    }
+}
+
+impl<T> Drop for StreamIter<T> {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_walk<T, F>(
+    root: PathBuf,
+    ignore: bool,
+    hidden: bool,
+    max_depth: Option<usize>,
+    min_depth: Option<usize>,
+    max_filesize: Option<u64>,
+    follow_links: bool,
+    same_file_system: bool,
+    filters: Arc<PathFilters>,
+    entry: F,
+) -> StreamIter<T>
+where
+    T: Send + 'static,
+    F: Fn(
+            Result<DirEntry, ignore::Error>,
+            &Path,
+            &PathFilters,
+            &mpsc::SyncSender<Result<T, RgApiError>>,
+            &Arc<AtomicBool>,
+        ) -> WalkState
+        + Send
+        + Sync
+        + Clone
+        + 'static,
+{
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_cancel = cancel.clone();
+    let (tx, rx) = mpsc::sync_channel(8192);
+    let worker = std::thread::spawn(move || {
+        let mut walker = WalkBuilder::new(&root);
+        configure_walker(
+            &mut walker,
+            ignore,
+            hidden,
+            max_depth,
+            min_depth,
+            max_filesize,
+            follow_links,
+            same_file_system,
+        );
+        filter_dirs(&mut walker, &root, filters.clone());
+        walker.build_parallel().run(|| {
+            let tx = tx.clone();
+            let root = root.clone();
+            let filters = filters.clone();
+            let cancel = worker_cancel.clone();
+            let entry = entry.clone();
+            Box::new(move |dent| {
+                if cancel.load(Ordering::Relaxed) {
+                    return WalkState::Quit;
+                }
+                catch_unwind(AssertUnwindSafe(|| {
+                    entry(dent, &root, &filters, &tx, &cancel)
+                }))
+                .unwrap_or_else(|_| {
+                    let _ = tx.send(Err(RgApiError::new(
+                        "internal error during search (this is a bug, please report it)",
+                    )));
+                    WalkState::Quit
+                })
+            })
+        });
+    });
+    StreamIter {
+        rx,
+        cancel,
+        _worker: worker,
+    }
 }
 
 fn find_entry(

@@ -6,12 +6,12 @@ mod walk;
 
 mod python;
 
-pub use nb::{nb_search, nb_search_file, NbCell, NbOptions};
+pub use nb::{nb_iter, nb_search, nb_search_file, NbCell, NbIter, NbOptions};
 pub use search::{
     compile_regex, rg, rg_iter, search_path, search_text, MatchSpan, RgIter, RgOptions, SearchKind,
     SearchLine,
 };
-pub use walk::{find, FindOptions};
+pub use walk::{find, find_cancelable, FindOptions, StreamIter};
 
 #[derive(Debug, Clone)]
 pub struct RgApiError {

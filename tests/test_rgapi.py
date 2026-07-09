@@ -3,7 +3,7 @@ import _thread, json, threading
 import pytest
 
 from rgapi import _core
-from rgapi import Regex, SearchResults, compile, fd, rg, rg_iter, search_path, search_text, walk
+from rgapi import PathResults, Regex, SearchResults, compile, fd, rg, rg_iter, search_path, search_text, walk
 
 
 def make_tree(tmp_path):
@@ -363,3 +363,40 @@ def test_max_results_and_count(tmp_path):
     try: nbrg("foo", str(tmp_path), max_reslts=2)
     except TypeError as e: assert "max_reslts" in str(e)
     else: assert False
+
+
+def test_pathresults_and_stop_reason(tmp_path):
+    make_tree(tmp_path)
+    (tmp_path / "more.py").write_text("TODO one\nTODO two\n")
+    found = fd(tmp_path)
+    assert type(found) is PathResults and isinstance(found, list)
+    assert found.complete and found.stop_reason is None
+    assert str(found) == "\n".join(found)
+    assert type(walk(tmp_path)) is PathResults
+    assert type(rg("TODO", tmp_path, paths=True)) is PathResults
+
+    full = rg("TODO", tmp_path)
+    assert full.complete and full.stop_reason is None and len(full) == 3
+    res = rg("TODO", tmp_path, max_results=1)
+    assert res.stop_reason == "max_results" and not res.complete
+    ps = rg("TODO", tmp_path, paths=True, max_results=1)
+    assert ps.stop_reason == "max_results" and len(ps) == 1
+
+    res = rg("TODO", tmp_path, timeout_ms=10_000)
+    assert res.stop_reason is None and sorted(map(str, res)) == sorted(map(str, full))
+    assert rg("TODO", tmp_path, timeout_ms=0).stop_reason == "timeout"
+    ps = rg("TODO", tmp_path, paths=True, timeout_ms=10_000)
+    assert ps.complete and sorted(ps) == sorted(rg("TODO", tmp_path, paths=True))
+    with pytest.raises(AssertionError): rg("TODO", tmp_path, count=True, timeout_ms=1)
+
+
+def test_nbrg_stop_reason(tmp_path):
+    from rgapi import NbResults, nbrg
+    write_nb(tmp_path / "nb.ipynb", [_cell("code", "foo a\n"), _cell("code", "foo b\n")])
+    res = nbrg("foo", str(tmp_path))
+    assert type(res) is NbResults and res.complete and res.stop_reason is None
+    res = nbrg("foo", str(tmp_path), max_results=1)
+    assert res.stop_reason == "max_results" and not res.complete and len(res) == 1
+    assert nbrg("foo", str(tmp_path), timeout_ms=10_000).complete
+    assert nbrg("foo", str(tmp_path), timeout_ms=0).stop_reason == "timeout"
+    with pytest.raises(AssertionError): nbrg("foo", str(tmp_path), count=True, timeout_ms=1)

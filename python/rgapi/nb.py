@@ -1,9 +1,10 @@
 "Notebook-aware search: run `rg`-style search over `.ipynb` files, returning matched cells instead of raw JSON lines."
 
-from pathlib import Path
 from fastcore.meta import delegates
 
-from . import _core, _walk_args, _fs_path
+from contextlib import aclosing
+
+from . import _core, _walk_args, _fs_path, _acall, _abatches, _mk_results, _Results
 
 
 def _preview(text, width=120):
@@ -33,14 +34,15 @@ class NbCell:
     def _repr_pretty_(self, p, cycle): p.text("..." if cycle else str(self))
 
 
-class NbResults(list):
+class NbResults(_Results):
     "List of `NbCell` rows with rg-style text display."
     def __str__(self): return "\n".join(map(str, self))
-    def _repr_pretty_(self, p, cycle): p.text("..." if cycle else str(self))
 
 
-def _rows_to_cells(rows):
-    return [NbCell(p, ci, cid, ct, kind, src, list(matches)) for p,ci,cid,ct,kind,src,matches in rows]
+def _row_to_cell(row):
+    p,ci,cid,ct,kind,src,matches = row
+    return NbCell(p, ci, cid, ct, kind, src, list(matches))
+def _rows_to_cells(rows): return [_row_to_cell(row) for row in rows]
 
 
 def search_nb(
@@ -60,6 +62,15 @@ def search_nb(
     return res
 
 
+def _nb_post(rows, max_results, count, timed_out):
+    "Reduce collected notebook rows to the requested `nbrg`/`nbrga` result form"
+    res = _rows_to_cells(rows)
+    res.sort(key=lambda c: (c.path, c.cell_index))
+    if count: return len(res)
+    capped = max_results is not None and len(res) > max_results
+    return _mk_results(NbResults, res[:max_results] if capped else res, capped, timed_out)
+
+
 @delegates(_walk_args, but=["ext"])
 def nbrg(
     pattern:str, # Regex pattern to search for
@@ -69,14 +80,63 @@ def nbrg(
     smart_case:bool=False, # Match `rg --smart-case` behavior
     max_results:int|None=None, # Return at most this many cells
     count:bool=False, # Return the number of matching cells instead of results
+    timeout_ms:int|None=None, # Cancel the search after this long and return partial results
     **kwargs
 ) -> NbResults:
     "Search `.ipynb` cell sources under `root` in parallel, returning matched cells."
     assert not (count and max_results), "count and max_results are mutually exclusive"
-    rows = _core.nb_search(pattern, _fs_path(root), *_walk_args(ext="ipynb", **kwargs),
-        case_sensitive, smart_case, cell_context)
-    res = NbResults(_rows_to_cells(rows))
-    res.sort(key=lambda c: (c.path, c.cell_index))
-    if count: return len(res)
-    if max_results is not None: res = NbResults(res[:max_results])
-    return res
+    assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
+    rows, timed_out = _core.nb_search(pattern, _fs_path(root), *_walk_args(ext="ipynb", **kwargs),
+        case_sensitive, smart_case, cell_context, timeout_ms)
+    return _nb_post(rows, max_results, count, timed_out)
+
+
+@delegates(_walk_args, but=["ext"])
+def nbrg_iter(
+    pattern:str, # Regex pattern to search for
+    root:str=".", # Directory to search (expands `~`)
+    cell_context:int=0, # Cells of context to include before/after each matching cell
+    case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
+    smart_case:bool=False, # Match `rg --smart-case` behavior
+    **kwargs
+):
+    "Search `.ipynb` cell sources lazily, yielding `NbCell` rows as they are found."
+    it = _core.nb_iter(pattern, _fs_path(root), *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context)
+    return map(_row_to_cell, it)
+
+
+@delegates(_walk_args, but=["ext"])
+async def nbrga(
+    pattern:str, # Regex pattern to search for
+    root:str=".", # Directory to search (expands `~`)
+    cell_context:int=0, # Cells of context to include before/after each matching cell
+    case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
+    smart_case:bool=False, # Match `rg --smart-case` behavior
+    max_results:int|None=None, # Return at most this many cells
+    count:bool=False, # Return the number of matching cells instead of results
+    timeout_ms:int|None=None, # Cancel the search after this long and return partial results
+    **kwargs
+) -> NbResults:
+    "Async `nbrg`: search notebooks on Rust threads without blocking the event loop."
+    assert not (count and max_results), "count and max_results are mutually exclusive"
+    assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
+    rows, timed_out = await _acall(_core.nb_search_async, pattern, _fs_path(root),
+        *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context, timeout_ms)
+    return _nb_post(rows, max_results, count, timed_out)
+
+
+@delegates(_walk_args, but=["ext"])
+async def nbrga_iter(
+    pattern:str, # Regex pattern to search for
+    root:str=".", # Directory to search (expands `~`)
+    cell_context:int=0, # Cells of context to include before/after each matching cell
+    case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
+    smart_case:bool=False, # Match `rg --smart-case` behavior
+    batch_max:int=512, # Largest batch of cells delivered to the event loop at once
+    **kwargs
+):
+    "Async `nbrg_iter`: yield `NbCell` rows as they are found; early exit cancels the search."
+    async with aclosing(_abatches(_core.nb_iter_async, batch_max, pattern, _fs_path(root),
+        *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context)) as batches:
+        async for rows in batches:
+            for row in rows: yield _row_to_cell(row)

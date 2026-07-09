@@ -1,3 +1,4 @@
+.sesskey
 dist/
 Cargo.lock
 tags

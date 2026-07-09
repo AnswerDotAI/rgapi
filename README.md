@@ -24,6 +24,15 @@ from rgapi import nbrg
 nbrg("read_csv", ".", cell_context=1)
 ```
 
+Every walk and search has an async twin, plus streaming forms that yield results as they are found (see [Async](#async)):
+
+```python
+from rgapi import fda, rga, rga_iter, nbrga, nbrga_iter
+
+await rga("TODO", ".", ext="py", timeout_ms=200)
+async for row in rga_iter("TODO", "."): print(row)
+```
+
 For direct access to the regex, search, and walk pieces:
 
 ```python
@@ -68,6 +77,8 @@ matches      list of (start, end) byte offsets for match rows
 
 `SearchLine` has a structured `repr`, an rg-style `str` (the `line` is truncated to 120 chars with a trailing `…` for display; `repr` and `asdict()` keep the full line), and `SearchLine.asdict()` returns row fields as a plain Python dict. Pass `rg(..., lnhash=True)` or `rg_iter(..., lnhash=True)` to show `lnhash` addresses instead of line numbers in row display while keeping `line_number` available. `rg(..., paths=True)` returns unique matched paths, and `rg(..., count=True)` returns the total number of match spans. `paths` and `count` cannot both be set.
 
+`fd`, `walk`, and `rg(..., paths=True)` return `PathResults`, a list subclass displayed one path per line. `rg(..., timeout_ms=200)` stops the search at the deadline and returns whatever was collected by then. Results record how they ended: `stop_reason` is `None` for a complete result, `"max_results"` when truncated by `max_results`, or `"timeout"` when a deadline hit, and `complete` is true when `stop_reason` is `None`. `count=True` returns a plain int, which cannot carry the flag, so it rejects `timeout_ms`.
+
 `before_context`, `after_context`, and `context` are like `rg -B`, `rg -A`, and `rg -C`. Files containing NUL bytes or invalid UTF-8 are skipped.
 
 Search is case-sensitive by default, matching `rg`. Use `smart_case=True` for `rg --smart-case` behavior, or `case_sensitive=False` to force case-insensitive matching.
@@ -101,7 +112,35 @@ matches      list of SearchLine rows for the matched lines within the cell
 
 `cell_context=N` includes the `N` cells before and after each matching cell as `kind="context"` rows (deduplicated per notebook).
 
+`nbrg_iter` yields `NbCell` rows lazily as notebooks are parsed. `nbrg` also accepts `max_results` (at most that many cells, after sorting by path and cell index), `count=True` (number of matching cells), and `timeout_ms=` with the same `stop_reason` semantics as `rg`.
+
 Notebook walking, parsing, and matching all happen in parallel in Rust, in the same pass as the file walk. Parsing uses a lean model that reads only each cell's `id`, `cell_type`, and `source` and skips outputs and metadata, so large embedded outputs (images, plots) are never materialized. `search_nb(pattern, path, ...)` searches a single notebook file the same way.
+
+## Async
+
+`fda`, `rga`, and `nbrga` are awaitable twins of `fd`, `rg`, and `nbrg`, and `rga_iter` and `nbrga_iter` are async generators that yield rows as the search finds them. All take the same arguments and return the same types as their sync counterparts.
+
+```python
+from rgapi import fda, rga, rga_iter
+
+await fda(".", ext="py")
+res = await rga("TODO", ".", timeout_ms=200)
+if not res.complete: print(f"partial results: {res.stop_reason}")
+async for row in rga_iter("TODO", "."): ...
+```
+
+None of this uses `asyncio.to_thread` or the loop's executor. The walk and search run on Rust threads, and a single callback settles the awaited future (or feeds the generator's queue) through `loop.call_soon_threadsafe`, so the event loop never blocks and contextvars behave normally.
+
+Cancellation cleans up the Rust workers automatically. Wrapping a call in `asyncio.wait_for` or `asyncio.timeout`, cancelling the task (as starlette does when a client disconnects), or leaving an `async for` early all stop the search within about one row. One caveat comes from the language rather than the library: `break` inside `async for` only finalizes the generator at GC time, so for prompt cleanup wrap the iterator in `contextlib.aclosing`:
+
+```python
+async with aclosing(rga_iter("TODO", ".")) as it:
+    async for row in it:
+        if enough(row): break
+```
+
+The streaming forms suit incremental display, such as pushing each batch of results to a browser as it arrives. The collected forms with `timeout_ms` give the best results available within a budget, and `asyncio.wait_for` gives timeout-as-failure. Pick per call site.
+
 
 ## Benchmarks
 

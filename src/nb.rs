@@ -1,16 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use grep_regex::RegexMatcher;
-use ignore::{DirEntry, WalkBuilder, WalkState};
+use ignore::{DirEntry, WalkState};
 use serde::Deserialize;
 
 use crate::search::{compile_regex, search_text, SearchLine};
-use crate::walk::{
-    configure_walker, filter_dirs, normalize_root, rel_path, resolve_root, PathFilters,
-};
+use crate::walk::{normalize_root, rel_path, resolve_root, spawn_walk, PathFilters, StreamIter};
 use crate::RgApiError;
 
 #[derive(Debug, Clone)]
@@ -201,7 +199,9 @@ fn nb_entry(
     process_file(rel, &bytes, matcher, cell_context)
 }
 
-pub fn nb_search(opts: &NbOptions) -> Result<Vec<NbCell>, RgApiError> {
+pub type NbIter = StreamIter<NbCell>;
+
+pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
     let (root_in, includes, max_depth, ignore, hidden) = resolve_root(
         &opts.root,
         &opts.includes,
@@ -219,9 +219,9 @@ pub fn nb_search(opts: &NbOptions) -> Result<Vec<NbCell>, RgApiError> {
         opts.skip_dir_re.as_deref(),
     )?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case)?;
-    let mut walker = WalkBuilder::new(&root);
-    configure_walker(
-        &mut walker,
+    let cell_context = opts.cell_context;
+    Ok(spawn_walk(
+        root,
         ignore,
         hidden,
         max_depth,
@@ -229,40 +229,30 @@ pub fn nb_search(opts: &NbOptions) -> Result<Vec<NbCell>, RgApiError> {
         opts.max_filesize,
         opts.follow_links,
         opts.same_file_system,
-    );
-    filter_dirs(&mut walker, &root, filters.clone());
-    let cell_context = opts.cell_context;
-    let (tx, rx) = mpsc::channel();
-    walker.build_parallel().run(|| {
-        let tx = tx.clone();
-        let root = root.clone();
-        let filters = filters.clone();
-        let matcher = matcher.clone();
-        Box::new(move |entry| {
-            let outcome = catch_unwind(AssertUnwindSafe(|| {
-                nb_entry(entry, &root, &filters, &matcher, cell_context)
-            }))
-            .unwrap_or_else(|_| {
-                Err(RgApiError::new(
-                    "internal error during notebook search (this is a bug, please report it)",
-                ))
-            });
-            match outcome {
-                Ok(cells) => {
-                    for cell in cells {
-                        if tx.send(Ok(cell)).is_err() {
-                            return WalkState::Quit;
-                        }
+        filters,
+        move |dent, root, filters, tx, cancel| match nb_entry(
+            dent,
+            root,
+            filters,
+            &matcher,
+            cell_context,
+        ) {
+            Ok(cells) => {
+                for cell in cells {
+                    if cancel.load(Ordering::Relaxed) || tx.send(Ok(cell)).is_err() {
+                        return WalkState::Quit;
                     }
                 }
-                Err(err) => {
-                    let _ = tx.send(Err(err));
-                    return WalkState::Quit;
-                }
+                WalkState::Continue
             }
-            WalkState::Continue
-        })
-    });
-    drop(tx);
-    rx.into_iter().collect()
+            Err(err) => {
+                let _ = tx.send(Err(err));
+                WalkState::Quit
+            }
+        },
+    ))
+}
+
+pub fn nb_search(opts: &NbOptions) -> Result<Vec<NbCell>, RgApiError> {
+    nb_iter(opts)?.collect()
 }
