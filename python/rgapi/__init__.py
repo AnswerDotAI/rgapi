@@ -33,6 +33,10 @@ class PathResults(_Results):
     "List of relative paths with line-per-path display."
     def __str__(self): return "\n".join(self)
 
+def _preview(text, maxlen=120):
+    text = text.rstrip("\n").replace("\n", "\\n")
+    return text if len(text) <= maxlen else text[:maxlen] + "…"
+
 
 def _listify(value):
     if value is None: return []
@@ -41,12 +45,8 @@ def _listify(value):
 def _fs_path(path): return str(Path(path).expanduser())
 def _display_path(path): return None if path is None else fspath(path)
 def _filters(glob=None, include=None, exclude=None, ext=None):
-    includes = _listify(include) + _listify(glob)
-    for suffix in _listify(ext):
-        suffix = str(suffix)
-        if suffix.startswith("."): suffix = suffix[1:]
-        includes.append(f"*.{suffix}")
-    return includes, _listify(exclude)
+    exts = [f"*.{str(s).lstrip('.')}" for s in _listify(ext)]
+    return _listify(include) + _listify(glob), _listify(exclude), exts
 
 
 def _context(context, before_context, after_context):
@@ -79,7 +79,7 @@ def _walk_args(
     glob=None, # Include glob or globs; alias for `include`
     include=None, # Include glob or globs, e.g. `*.py`
     exclude=None, # Exclude glob or globs, e.g. `test_*.py`
-    ext=None, # Extension or extensions to include, without needing `*.`
+    ext=None, # Extension or extensions to require, without needing `*.`; ANDs with `include`/`glob`
     hidden:bool=False, # Include hidden files and directories
     ignore:bool=True, # Respect `.gitignore` and other ignore files
     max_depth:int|None=None, # Maximum directory depth to descend
@@ -93,14 +93,14 @@ def _walk_args(
     skip_dir_re:str|None=None, # Directory regex used to prune traversal
 ):
     "Walk/filter positional tail for `_core` calls; delegators pass their `**kwargs` here whole"
-    include, exclude = _filters(glob, include, exclude, ext)
-    return (include, exclude, hidden, ignore, max_depth, min_depth, max_filesize,
+    include, exclude, exts = _filters(glob, include, exclude, ext)
+    return (include, exclude, exts, hidden, ignore, max_depth, min_depth, max_filesize,
         follow_links, same_file_system, path_re, skip_path_re, _listify(skip_dir), skip_dir_re)
 
 @delegates(_walk_args)
 def fd(
     root:str|Path=".", # Directory to walk (expands `~`)
-    pattern:str|None=None, # Substring that relative paths must contain
+    pattern:str|None=None, # Smart-case regex matched against each basename
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
     **kwargs
@@ -129,7 +129,7 @@ async def _acall(fn, *args):
 @delegates(fd)
 async def fda(
     root:str|Path=".", # Directory to walk (expands `~`)
-    pattern:str|None=None, # Substring that relative paths must contain
+    pattern:str|None=None, # Smart-case regex matched against each basename
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
     **kwargs
@@ -192,14 +192,21 @@ def rg(
     max_results:int|None=None, # Stop after this many matching rows; context rows of kept matches are included
     lnhash:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
+    summary:bool=False, # Return one newline-escaped line per blank-line-delimited block?
+    maxlen:int=120, # Maximum source characters per displayed block
     **kwargs
 ):
     "Search files and return `SearchResults`, matched paths, or a count; `lnhash=True` shows exhash-style addresses."
     assert not (paths and count), "paths and count are mutually exclusive"
     assert not (count and max_results), "count and max_results are mutually exclusive"
     assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
+    assert not (summary and count), "summary and count are mutually exclusive"
+    assert not (summary and paths), "summary and paths are mutually exclusive"
     before_context, after_context = _context(context, before_context, after_context)
     args = (pattern, _fs_path(root), *_walk_args(**kwargs), case_sensitive, smart_case, before_context, after_context)
+    if summary:
+        rows,timed_out = _core.block_search(*args, timeout_ms)
+        return _block_post(rows, max_results, before_context, after_context, timed_out, maxlen, lnhash)
     if count: return sum(len(row.matches) for row in _core.rg_iter(*args) if row.kind == "match")
     if paths and timeout_ms is None:
         seen, res, capped = set(), [], False
@@ -247,14 +254,21 @@ async def rga(
     max_results:int|None=None, # Stop after this many matching rows; context rows of kept matches are included
     lnhash:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
+    summary:bool=False, # Return one newline-escaped line per blank-line-delimited block?
+    maxlen:int=120, # Maximum source characters per displayed block
     **kwargs
 ):
     "Async `rg`: search on Rust threads without blocking the event loop."
     assert not (paths and count), "paths and count are mutually exclusive"
     assert not (count and max_results), "count and max_results are mutually exclusive"
     assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
+    assert not (summary and count), "summary and count are mutually exclusive"
+    assert not (summary and paths), "summary and paths are mutually exclusive"
     before_context, after_context = _context(context, before_context, after_context)
     args = (pattern, _fs_path(root), *_walk_args(**kwargs), case_sensitive, smart_case, before_context, after_context)
+    if summary:
+        rows,timed_out = await _acall(_core.block_search_async, *args, timeout_ms)
+        return _block_post(rows, max_results, before_context, after_context, timed_out, maxlen, lnhash)
     rows, timed_out = await _acall(_core.rg_async, *args, lnhash, timeout_ms)
     return _rg_post(rows, paths, count, max_results, timed_out)
 
@@ -324,6 +338,7 @@ def search_path(
     return SearchResults(_core.search_path(matcher, _fs_path(path), _display_path(display_path), before_context, after_context))
 
 
+from .block import BlockResults, SearchBlock, _block_post
 from .nb import NbCell, NbResults, nbrg, nbrg_iter, nbrga, nbrga_iter, search_nb
 
 __all__ = [ "RgIter", "fd", "fda", "rg", "rga", "rg_iter", "rga_iter", "nbrg", "nbrg_iter", "nbrga", "nbrga_iter" ]

@@ -56,6 +56,7 @@ pub struct RgOptions {
     pub pattern: String,
     pub includes: Vec<String>,
     pub excludes: Vec<String>,
+    pub exts: Vec<String>,
     pub path_re: Option<String>,
     pub skip_path_re: Option<String>,
     pub skip_dirs: Vec<String>,
@@ -81,6 +82,7 @@ impl Default for RgOptions {
             pattern: String::new(),
             includes: Vec::new(),
             excludes: Vec::new(),
+            exts: Vec::new(),
             path_re: None,
             skip_path_re: None,
             skip_dirs: Vec::new(),
@@ -117,6 +119,7 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
     let filters = Arc::new(PathFilters::new(
         &includes,
         &opts.excludes,
+        &opts.exts,
         opts.path_re.as_deref(),
         opts.skip_path_re.as_deref(),
         &opts.skip_dirs,
@@ -255,7 +258,7 @@ fn line_hash_u16(line: &str) -> u16 {
     (h.finish() & 0xffff) as u16
 }
 
-fn format_lnhash(lineno: u64, line: &str) -> String {
+pub(crate) fn format_lnhash(lineno: u64, line: &str) -> String {
     format!("{}|{:04x}|", lineno, line_hash_u16(line))
 }
 

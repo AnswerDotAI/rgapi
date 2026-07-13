@@ -26,6 +26,11 @@ def test_async_results_match_sync(tmp_path):
     assert run_sync(rga("TODO", tmp_path, max_results=1)).stop_reason == "max_results"
     assert run_sync(rga("TODO", tmp_path, timeout_ms=0)).stop_reason == "timeout"
     with pytest.raises(ValueError): run_sync(rga("(bad", tmp_path))
+    blocks = rg("TODO", tmp_path, summary=True, context=1, maxlen=20)
+    got = run_sync(rga("TODO", tmp_path, summary=True, context=1, maxlen=20))
+    assert str(got) == str(blocks)
+    assert run_sync(rga("TODO", tmp_path, summary=True, max_results=1)).stop_reason == "max_results"
+    assert run_sync(rga("TODO", tmp_path, summary=True, timeout_ms=0)).stop_reason == "timeout"
 
 
 def test_rga_iter(tmp_path):

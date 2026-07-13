@@ -17,6 +17,7 @@ pub struct NbOptions {
     pub pattern: String,
     pub includes: Vec<String>,
     pub excludes: Vec<String>,
+    pub exts: Vec<String>,
     pub path_re: Option<String>,
     pub skip_path_re: Option<String>,
     pub skip_dirs: Vec<String>,
@@ -213,6 +214,7 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
     let filters = Arc::new(PathFilters::new(
         &includes,
         &opts.excludes,
+        &opts.exts,
         opts.path_re.as_deref(),
         opts.skip_path_re.as_deref(),
         &opts.skip_dirs,

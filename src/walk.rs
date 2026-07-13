@@ -16,6 +16,7 @@ pub struct FindOptions {
     pub pattern: Option<String>,
     pub includes: Vec<String>,
     pub excludes: Vec<String>,
+    pub exts: Vec<String>,
     pub path_re: Option<String>,
     pub skip_path_re: Option<String>,
     pub skip_dirs: Vec<String>,
@@ -39,6 +40,7 @@ impl Default for FindOptions {
             pattern: None,
             includes: Vec::new(),
             excludes: Vec::new(),
+            exts: Vec::new(),
             path_re: None,
             skip_path_re: None,
             skip_dirs: Vec::new(),
@@ -76,6 +78,7 @@ pub fn find_cancelable(
     let filters = Arc::new(PathFilters::new(
         &includes,
         &opts.excludes,
+        &opts.exts,
         opts.path_re.as_deref(),
         opts.skip_path_re.as_deref(),
         &opts.skip_dirs,
@@ -94,7 +97,12 @@ pub fn find_cancelable(
     );
     filter_dirs(&mut walker, &root, filters.clone());
     let (tx, rx) = mpsc::channel();
-    let pattern = opts.pattern.clone();
+    let pattern = opts
+        .pattern
+        .as_deref()
+        .map(build_fd_re)
+        .transpose()?
+        .map(Arc::new);
     let files = opts.files;
     let dirs = opts.dirs;
     let panic_probe = opts.panic_probe;
@@ -252,7 +260,7 @@ fn find_entry(
     entry: Result<DirEntry, ignore::Error>,
     root: &Path,
     filters: &PathFilters,
-    pattern: Option<&str>,
+    pattern: Option<&RegexMatcher>,
     files: bool,
     dirs: bool,
 ) -> Result<Option<String>, RgApiError> {
@@ -274,8 +282,9 @@ fn find_entry(
         return Ok(None);
     }
     let rel = rel_path(root, path);
-    if let Some(pat) = pattern {
-        if !rel.contains(pat) {
+    if let Some(pattern) = pattern {
+        let name = dent.file_name().to_string_lossy();
+        if !re_match(pattern, &name) {
             return Ok(None);
         }
     }
@@ -369,6 +378,7 @@ pub(crate) fn filter_dirs(walker: &mut WalkBuilder, root: &Path, filters: Arc<Pa
 pub(crate) struct PathFilters {
     includes: Option<GlobSet>,
     excludes: Option<GlobSet>,
+    exts: Option<GlobSet>,
     path_re: Option<RegexMatcher>,
     skip_path_re: Option<RegexMatcher>,
     skip_dirs: Option<GlobSet>,
@@ -379,6 +389,7 @@ impl PathFilters {
     pub(crate) fn new(
         includes: &[String],
         excludes: &[String],
+        exts: &[String],
         path_re: Option<&str>,
         skip_path_re: Option<&str>,
         skip_dirs: &[String],
@@ -387,6 +398,7 @@ impl PathFilters {
         Ok(Self {
             includes: build_globs(includes)?,
             excludes: build_globs(excludes)?,
+            exts: build_globs(exts)?,
             path_re: build_path_re(path_re)?,
             skip_path_re: build_path_re(skip_path_re)?,
             skip_dirs: build_globs(skip_dirs)?,
@@ -408,6 +420,11 @@ impl PathFilters {
         }
         if let Some(path_re) = &self.path_re {
             if !re_match(path_re, rel) {
+                return false;
+            }
+        }
+        if let Some(exts) = &self.exts {
+            if !exts.is_match(path) {
                 return false;
             }
         }
@@ -464,6 +481,14 @@ fn add_glob(builder: &mut GlobSetBuilder, glob: &str) -> Result<(), RgApiError> 
         builder.add(Glob::new(&format!("**/{glob}")).map_err(|e| RgApiError::new(e.to_string()))?);
     }
     Ok(())
+}
+
+fn build_fd_re(pattern: &str) -> Result<RegexMatcher, RgApiError> {
+    let mut builder = RegexMatcherBuilder::new();
+    builder.case_smart(true);
+    builder
+        .build(pattern)
+        .map_err(|e| RgApiError::new(e.to_string()))
 }
 
 fn build_path_re(pattern: Option<&str>) -> Result<Option<RegexMatcher>, RgApiError> {

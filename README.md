@@ -58,7 +58,7 @@ pip install rgapi
 `fd` and `walk` return slash-separated paths relative to `root`. They use the `ignore` crate, so `.gitignore`, `.ignore`, and the usual ripgrep filters apply by default. `.rgignore` files are also honored and take precedence over `.gitignore`. Hidden files are skipped unless `hidden=True`. Pass `ignore=False` to disable all ignore filtering (including `.rgignore`). Symlinks are not followed unless `follow_links=True`; `same_file_system=True` avoids crossing filesystem boundaries. Traversal is parallel, and result order is not guaranteed; use `sorted(...)` if order matters.
 `root` arguments accept `str` or `pathlib.Path` and expand `~`; `search_path` also accepts path-like file paths. Display labels such as `display_path` are stringified without expansion.
 
-`fd` adds fd-like filtering on top of `walk`: `pattern` is a substring match on the relative path, and `include`/`exclude` use glob syntax. `glob=` is accepted as an alias for `include=`. A basename glob such as `*.py` also matches recursively, so it finds `src/app.py`. Use `ext="py"` or `ext=["py", "rs"]` for extension filters, `min_depth=`/`max_depth=` to bound recursion, and `max_filesize=` to skip files above a byte limit.
+`fd` adds fd-like filtering on top of `walk`: `pattern` is a smart-case regex matched against each basename, and `include`/`exclude` use glob syntax. Lowercase patterns match case-insensitively; a pattern containing uppercase letters is case-sensitive. Use `path_re` when matching the slash-separated relative path instead. `glob=` is accepted as an alias for `include=`. A basename glob such as `*.py` also matches recursively, so it finds `src/app.py`. Use `ext="py"` or `ext=["py", "rs"]` for extension filters, which compose as AND with `include`/`glob` (so `include="src/*", ext="py"` means `src/*` *and* `*.py`, like combining `rg -g` with `-t`); use `min_depth=`/`max_depth=` to bound recursion, and `max_filesize=` to skip files above a byte limit.
 
 `path_re` and `skip_path_re` are regex filters on slash-separated relative paths. They filter returned paths or searched files, but do not control traversal. `skip_dir` uses glob syntax to prune matching directory subtrees, and `skip_dir_re` does the same with regex.
 
@@ -80,6 +80,18 @@ matches      list of (start, end) byte offsets for match rows
 `fd`, `walk`, and `rg(..., paths=True)` return `PathResults`, a list subclass displayed one path per line. `rg(..., timeout_ms=200)` stops the search at the deadline and returns whatever was collected by then. Results record how they ended: `stop_reason` is `None` for a complete result, `"max_results"` when truncated by `max_results`, or `"timeout"` when a deadline hit, and `complete` is true when `stop_reason` is `None`. `count=True` returns a plain int, which cannot carry the flag, so it rejects `timeout_ms`.
 
 `before_context`, `after_context`, and `context` are like `rg -B`, `rg -A`, and `rg -C`. Files containing NUL bytes or invalid UTF-8 are skipped.
+
+### Block summaries
+
+`rg(..., summary=True)` returns one row per blank-line-delimited block instead of one row per matching line. Empty and whitespace-only lines delimit blocks. A block containing several matching lines appears once and keeps every matching `SearchLine` in `matches`.
+
+```python
+rg("TODO", ".", summary=True, context=1, maxlen=120)
+```
+
+The result is `BlockResults`, a list of `SearchBlock` objects. Each block has `path`, `block_index`, `start_line`, `end_line`, `start_lnhash`, `end_lnhash`, `kind`, full `source`, and `matches`. Its display is `path:start-end:source` for matches and `path:start-end-source` for context. With `lnhash=True`, the numeric range becomes copyable boundary addresses such as `path:4|a3f2|,6|b1c3|:source`. Embedded newlines are shown as `\n`; `maxlen` limits displayed source without changing `source` or `asdict()`.
+
+In summary mode, `before_context`, `after_context`, and `context` count neighbouring blocks. `max_results` counts matching blocks and retains their block context. `summary=True` cannot be combined with `paths` or `count`; it can be combined with `lnhash` when copyable block boundaries are useful.
 
 Search is case-sensitive by default, matching `rg`. Use `smart_case=True` for `rg --smart-case` behavior, or `case_sensitive=False` to force case-insensitive matching.
 
@@ -108,7 +120,7 @@ source       full cell source
 matches      list of SearchLine rows for the matched lines within the cell
 ```
 
-`NbCell.asdict()` returns those fields as a plain dict (with `matches` as `SearchLine` dicts). `str()`/pretty display is one truncated, newline-escaped line per cell, keyed by `cell_id` rather than a line number: `path:cell_id:source` for matches and `path:cell_id-source` for context cells. A cell with several matches appears once, with every hit collected in `matches`.
+`NbCell.asdict()` returns those fields as a plain dict (with `matches` as `SearchLine` dicts). `str()` and pretty display show one newline-escaped line per cell, keyed by `cell_id`: `path:cell_id:source` for matches and `path:cell_id-source` for context. `maxlen` controls the displayed source length and defaults to 120; the full source remains in `source` and `asdict()`. A cell with several matches appears once, with every hit collected in `matches`.
 
 `cell_context=N` includes the `N` cells before and after each matching cell as `kind="context"` rows (deduplicated per notebook).
 

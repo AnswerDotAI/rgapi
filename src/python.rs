@@ -11,9 +11,10 @@ use pyo3::types::{PyAny, PyDict};
 
 use crate::search::spans_for;
 use crate::{
-    compile_regex, find, find_cancelable, nb_iter as nb_iter_core, nb_search_file,
-    rg_iter as rg_iter_core, search_path as search_path_core, search_text as search_text_core,
-    FindOptions, NbCell, NbIter, NbOptions, RgIter, RgOptions, SearchLine, StreamIter,
+    block_iter as block_iter_core, compile_regex, find, find_cancelable, nb_iter as nb_iter_core,
+    nb_search_file, rg_iter as rg_iter_core, search_path as search_path_core,
+    search_text as search_text_core, FindOptions, NbCell, NbIter, NbOptions, RgIter, RgOptions,
+    SearchBlock, SearchLine, StreamIter,
 };
 use std::path::Path;
 
@@ -266,6 +267,7 @@ fn find_opts(
     pattern: Option<String>,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -285,6 +287,7 @@ fn find_opts(
         pattern,
         includes: include.unwrap_or_default(),
         excludes: exclude.unwrap_or_default(),
+        exts: exts.unwrap_or_default(),
         path_re,
         skip_path_re,
         skip_dirs: skip_dir.unwrap_or_default(),
@@ -326,6 +329,7 @@ fn walk_py(
         None,
         None,
         None,
+        None,
         hidden,
         ignore,
         max_depth,
@@ -345,13 +349,14 @@ fn walk_py(
 }
 
 #[pyfunction(name = "find")]
-#[pyo3(signature = (root=".", pattern=None, include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
+#[pyo3(signature = (root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
 fn find_py(
     py: Python<'_>,
     root: &str,
     pattern: Option<String>,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -371,6 +376,7 @@ fn find_py(
         pattern,
         include,
         exclude,
+        exts,
         hidden,
         ignore,
         max_depth,
@@ -434,6 +440,7 @@ fn rg_opts(
     root: &str,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -455,6 +462,7 @@ fn rg_opts(
         pattern,
         includes: include.unwrap_or_default(),
         excludes: exclude.unwrap_or_default(),
+        exts: exts.unwrap_or_default(),
         path_re,
         skip_path_re,
         skip_dirs: skip_dir.unwrap_or_default(),
@@ -475,13 +483,14 @@ fn rg_opts(
 }
 
 #[pyfunction(name = "rg")]
-#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false, timeout_ms=None))]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false, timeout_ms=None))]
 fn rg_py(
     py: Python<'_>,
     pattern: String,
     root: &str,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -505,6 +514,7 @@ fn rg_py(
         root,
         include,
         exclude,
+        exts,
         hidden,
         ignore,
         max_depth,
@@ -524,13 +534,67 @@ fn rg_py(
     let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     collect_stream_py(py, iter, move |l| search_line_py(l, lnhash), timeout_ms)
 }
+
+#[pyfunction(name = "block_search")]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, timeout_ms=None))]
+#[allow(clippy::too_many_arguments)]
+fn block_search_py(
+    py: Python<'_>,
+    pattern: String,
+    root: &str,
+    include: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
+    hidden: bool,
+    ignore: bool,
+    max_depth: Option<usize>,
+    min_depth: Option<usize>,
+    max_filesize: Option<u64>,
+    follow_links: bool,
+    same_file_system: bool,
+    path_re: Option<String>,
+    skip_path_re: Option<String>,
+    skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>,
+    case_sensitive: Option<bool>,
+    smart_case: bool,
+    before_context: usize,
+    after_context: usize,
+    timeout_ms: Option<u64>,
+) -> PyResult<(Vec<BlockRow>, bool)> {
+    let opts = rg_opts(
+        pattern,
+        root,
+        include,
+        exclude,
+        exts,
+        hidden,
+        ignore,
+        max_depth,
+        min_depth,
+        max_filesize,
+        follow_links,
+        same_file_system,
+        path_re,
+        skip_path_re,
+        skip_dir,
+        skip_dir_re,
+        case_sensitive,
+        smart_case,
+        before_context,
+        after_context,
+    );
+    let iter = block_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    collect_stream_py(py, iter, block_row, timeout_ms)
+}
 #[pyfunction(name = "rg_iter")]
-#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false))]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false))]
 fn rg_iter_py(
     pattern: String,
     root: &str,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -553,6 +617,7 @@ fn rg_iter_py(
         root,
         include,
         exclude,
+        exts,
         hidden,
         ignore,
         max_depth,
@@ -590,13 +655,14 @@ impl AsyncHandlePy {
 }
 
 #[pyfunction(name = "find_async")]
-#[pyo3(signature = (cb, root=".", pattern=None, include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
+#[pyo3(signature = (cb, root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
 fn find_async_py(
     cb: Py<PyAny>,
     root: &str,
     pattern: Option<String>,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -616,6 +682,7 @@ fn find_async_py(
         pattern,
         include,
         exclude,
+        exts,
         hidden,
         ignore,
         max_depth,
@@ -763,7 +830,7 @@ where
 }
 
 #[pyfunction(name = "rg_async")]
-#[pyo3(signature = (cb, pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false, timeout_ms=None))]
+#[pyo3(signature = (cb, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false, timeout_ms=None))]
 #[allow(clippy::too_many_arguments)]
 fn rg_async_py(
     cb: Py<PyAny>,
@@ -771,6 +838,7 @@ fn rg_async_py(
     root: &str,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -794,6 +862,7 @@ fn rg_async_py(
         root,
         include,
         exclude,
+        exts,
         hidden,
         ignore,
         max_depth,
@@ -826,8 +895,65 @@ fn rg_async_py(
     ))
 }
 
+#[pyfunction(name = "block_search_async")]
+#[pyo3(signature = (cb, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, timeout_ms=None))]
+#[allow(clippy::too_many_arguments)]
+fn block_search_async_py(
+    cb: Py<PyAny>,
+    pattern: String,
+    root: &str,
+    include: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
+    hidden: bool,
+    ignore: bool,
+    max_depth: Option<usize>,
+    min_depth: Option<usize>,
+    max_filesize: Option<u64>,
+    follow_links: bool,
+    same_file_system: bool,
+    path_re: Option<String>,
+    skip_path_re: Option<String>,
+    skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>,
+    case_sensitive: Option<bool>,
+    smart_case: bool,
+    before_context: usize,
+    after_context: usize,
+    timeout_ms: Option<u64>,
+) -> PyResult<AsyncHandlePy> {
+    let opts = rg_opts(
+        pattern,
+        root,
+        include,
+        exclude,
+        exts,
+        hidden,
+        ignore,
+        max_depth,
+        min_depth,
+        max_filesize,
+        follow_links,
+        same_file_system,
+        path_re,
+        skip_path_re,
+        skip_dir,
+        skip_dir_re,
+        case_sensitive,
+        smart_case,
+        before_context,
+        after_context,
+    );
+    let iter = block_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
+    Ok(stream_async(cb, iter, deadline, |py, rows, timed_out| {
+        let rows: Vec<BlockRow> = rows.into_iter().map(block_row).collect();
+        Ok((rows, timed_out).into_pyobject(py)?.into_any().unbind())
+    }))
+}
+
 #[pyfunction(name = "rg_iter_async")]
-#[pyo3(signature = (cb, batch_max, pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false))]
+#[pyo3(signature = (cb, batch_max, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false))]
 #[allow(clippy::too_many_arguments)]
 fn rg_iter_async_py(
     cb: Py<PyAny>,
@@ -836,6 +962,7 @@ fn rg_iter_async_py(
     root: &str,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -858,6 +985,7 @@ fn rg_iter_async_py(
         root,
         include,
         exclude,
+        exts,
         hidden,
         ignore,
         max_depth,
@@ -908,6 +1036,32 @@ fn panic_probe_py(py: Python<'_>, root: &str, walk: bool) -> PyResult<()> {
     Ok(())
 }
 
+type BlockRow = (
+    String,
+    usize,
+    u64,
+    u64,
+    String,
+    String,
+    String,
+    String,
+    Vec<SearchLinePy>,
+);
+
+fn block_row(block: SearchBlock) -> BlockRow {
+    (
+        block.path,
+        block.block_index,
+        block.start_line,
+        block.end_line,
+        block.start_lnhash,
+        block.end_lnhash,
+        block.kind.to_string(),
+        block.source,
+        block.matches.into_iter().map(SearchLinePy::from).collect(),
+    )
+}
+
 type NbRow = (
     String,
     usize,
@@ -936,6 +1090,7 @@ fn nb_opts(
     root: &str,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -956,6 +1111,7 @@ fn nb_opts(
         pattern,
         includes: include.unwrap_or_default(),
         excludes: exclude.unwrap_or_default(),
+        exts: exts.unwrap_or_default(),
         path_re,
         skip_path_re,
         skip_dirs: skip_dir.unwrap_or_default(),
@@ -994,7 +1150,7 @@ impl NbIterPy {
 }
 
 #[pyfunction(name = "nb_search")]
-#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, timeout_ms=None))]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, timeout_ms=None))]
 #[allow(clippy::too_many_arguments)]
 fn nb_search_py(
     py: Python<'_>,
@@ -1002,6 +1158,7 @@ fn nb_search_py(
     root: &str,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -1023,6 +1180,7 @@ fn nb_search_py(
         root,
         include,
         exclude,
+        exts,
         hidden,
         ignore,
         max_depth,
@@ -1043,13 +1201,14 @@ fn nb_search_py(
 }
 
 #[pyfunction(name = "nb_iter")]
-#[pyo3(signature = (pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0))]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0))]
 #[allow(clippy::too_many_arguments)]
 fn nb_iter_py(
     pattern: String,
     root: &str,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -1070,6 +1229,7 @@ fn nb_iter_py(
         root,
         include,
         exclude,
+        exts,
         hidden,
         ignore,
         max_depth,
@@ -1091,7 +1251,7 @@ fn nb_iter_py(
 }
 
 #[pyfunction(name = "nb_search_async")]
-#[pyo3(signature = (cb, pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, timeout_ms=None))]
+#[pyo3(signature = (cb, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, timeout_ms=None))]
 #[allow(clippy::too_many_arguments)]
 fn nb_search_async_py(
     cb: Py<PyAny>,
@@ -1099,6 +1259,7 @@ fn nb_search_async_py(
     root: &str,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -1120,6 +1281,7 @@ fn nb_search_async_py(
         root,
         include,
         exclude,
+        exts,
         hidden,
         ignore,
         max_depth,
@@ -1144,7 +1306,7 @@ fn nb_search_async_py(
 }
 
 #[pyfunction(name = "nb_iter_async")]
-#[pyo3(signature = (cb, batch_max, pattern, root=".", include=None, exclude=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0))]
+#[pyo3(signature = (cb, batch_max, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0))]
 #[allow(clippy::too_many_arguments)]
 fn nb_iter_async_py(
     cb: Py<PyAny>,
@@ -1153,6 +1315,7 @@ fn nb_iter_async_py(
     root: &str,
     include: Option<Vec<String>>,
     exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
     hidden: bool,
     ignore: bool,
     max_depth: Option<usize>,
@@ -1173,6 +1336,7 @@ fn nb_iter_async_py(
         root,
         include,
         exclude,
+        exts,
         hidden,
         ignore,
         max_depth,
@@ -1247,6 +1411,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(walk_py, m)?)?;
     m.add_function(wrap_pyfunction!(find_py, m)?)?;
     m.add_function(wrap_pyfunction!(rg_py, m)?)?;
+    m.add_function(wrap_pyfunction!(block_search_py, m)?)?;
     m.add_function(wrap_pyfunction!(rg_iter_py, m)?)?;
     m.add_function(wrap_pyfunction!(search_text_py, m)?)?;
     m.add_function(wrap_pyfunction!(search_path_py, m)?)?;
@@ -1260,6 +1425,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<AsyncHandlePy>()?;
     m.add_function(wrap_pyfunction!(find_async_py, m)?)?;
     m.add_function(wrap_pyfunction!(rg_async_py, m)?)?;
+    m.add_function(wrap_pyfunction!(block_search_async_py, m)?)?;
     m.add_function(wrap_pyfunction!(rg_iter_async_py, m)?)?;
     Ok(())
 }

@@ -3,7 +3,7 @@ import _thread, json, threading
 import pytest
 
 from rgapi import _core
-from rgapi import PathResults, Regex, SearchResults, compile, fd, rg, rg_iter, search_path, search_text, walk
+from rgapi import BlockResults, PathResults, Regex, SearchResults, compile, fd, rg, rg_iter, search_path, search_text, walk
 
 
 def make_tree(tmp_path):
@@ -35,6 +35,31 @@ def test_fd_is_relative_and_respects_ignore_hidden_and_globs(tmp_path):
     assert set(fd(str(tmp_path), ext="py")) == {"src/app.py"}
     assert set(fd(str(tmp_path), exclude="*.py")) == {"bad.txt", "bin.dat"}
     assert set(walk(str(tmp_path), files=True, dirs=False)) == found
+
+def test_ext_composes_as_and_with_include(tmp_path):
+    from rgapi import nbrg
+    make_tree(tmp_path)
+    (tmp_path / "src" / "app.rs").write_text("alpha\nTODO here\n")
+    write_nb(tmp_path / "one.ipynb", [_cell("code", ["foo = 1\n"], cid="c1")])
+    write_nb(tmp_path / "two.ipynb", [_cell("code", ["foo = 2\n"], cid="c2")])
+    assert set(fd(tmp_path, ext="py", include="src/*")) == {"src/app.py"}
+    assert fd(tmp_path, ext="py", include="*.rs") == []
+    assert set(fd(tmp_path, ext=["py", "rs"], include="app*")) == {"src/app.py", "src/app.rs"}
+    assert [r.path for r in rg("TODO", tmp_path, ext="rs", include="app*")] == ["src/app.rs"]
+    assert rg("TODO", tmp_path, ext="py", glob="*.rs", paths=True) == []
+    assert [c.cell_id for c in nbrg("foo", tmp_path, include="one.ipynb")] == ["c1"]
+    assert [c.cell_id for c in nbrg("foo", tmp_path, glob="two*")] == ["c2"]
+
+def test_fd_pattern_is_basename_regex_with_smart_case(tmp_path):
+    (tmp_path / "nested").mkdir()
+    for name in ("App.py", "app.rs", "other.py"): (tmp_path / "nested" / name).touch()
+    (tmp_path / "match-dir").mkdir()
+    (tmp_path / "match-dir" / "other.txt").touch()
+
+    assert set(fd(tmp_path, pattern=r"^app\.(py|rs)$")) == {"nested/App.py", "nested/app.rs"}
+    assert fd(tmp_path, pattern=r"^App\.py$") == ["nested/App.py"]
+    assert fd(tmp_path, pattern=r"match-dir") == []
+    with pytest.raises(ValueError): fd(tmp_path, pattern=r"(")
 
 def test_pathlike_arguments_and_expanduser(tmp_path, monkeypatch):
     make_tree(tmp_path)
@@ -161,6 +186,33 @@ def test_rg_str_truncates_long_lines_to_120_chars(tmp_path):
     line_b = next(r for r in res if r.path == "b.py")
     assert str(line_b) == f"b.py:1:{short[:120]}…"        # char-safe, no panic on é
 
+
+
+def test_rg_summary_groups_blocks_with_block_context(tmp_path):
+    src = "intro one\nintro two\n\nTODO first\nline\nTODO again\n   \nlast\n"
+    (tmp_path/"a.py").write_text(src)
+    res = rg("TODO", tmp_path, summary=True, context=1, maxlen=20)
+    assert type(res) is BlockResults and res.complete
+    assert [(b.kind,b.start_line,b.end_line) for b in res] == [
+        ("context",1,2), ("match",4,6), ("context",8,8)]
+    block = res[1]
+    assert block.source == "TODO first\nline\nTODO again"
+    assert [m.line_number for m in block.matches] == [4,6]
+    assert str(block) == r"a.py:4-6:TODO first\nline\nTO…"
+    assert str(res).splitlines()[0] == r"a.py:1-2-intro one\nintro two"
+    assert res[0].asdict()["source"] == "intro one\nintro two"
+    with pytest.raises(AssertionError): rg("TODO", tmp_path, summary=True, count=True)
+    with pytest.raises(AssertionError): rg("TODO", tmp_path, summary=True, paths=True)
+    hashed = rg("TODO", tmp_path, summary=True, lnhash=True, maxlen=20)
+    hblock = hashed[0]
+    assert str(hblock) == f"a.py:{hblock.start_lnhash},{hblock.end_lnhash}:TODO first\\nline\\nTO…"
+    assert hblock.asdict()["start_lnhash"] == hblock.start_lnhash
+
+    (tmp_path/"a.py").write_text("before\n\nTODO one\n\nbetween\n\nTODO two\n\nafter\n")
+    limited = rg("TODO", tmp_path, summary=True, context=1, max_results=1)
+    assert limited.stop_reason == "max_results"
+    assert [(b.kind,b.source) for b in limited] == [
+        ("context","before"), ("match","TODO one"), ("context","between")]
 
 def test_worker_panic_surfaces_as_error_not_truncation(tmp_path):
     # A panic inside a parallel search/walk worker must raise, not silently end the
@@ -336,6 +388,7 @@ def test_nbcell_str_truncates_and_escapes(tmp_path):
     assert "\n" not in s            # newlines escaped to a single display line
     assert s.endswith("…")          # long cell is truncated
     assert s.startswith("nb.ipynb:c1:")
+    assert str(search_nb("foo", p, display_path="nb.ipynb", maxlen=10)[0]) == "nb.ipynb:c1:x = 'aaaaa…"
 
 
 def test_max_results_and_count(tmp_path):
