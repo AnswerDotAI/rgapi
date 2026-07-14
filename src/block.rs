@@ -7,7 +7,9 @@ use grep_regex::RegexMatcher;
 use ignore::{DirEntry, WalkState};
 
 use crate::search::{compile_regex, format_lnhash, search_text, RgOptions, SearchLine};
-use crate::walk::{normalize_root, rel_path, resolve_root, spawn_walk, PathFilters, StreamIter};
+use crate::walk::{
+    entry_err, file_root_flags, normalize_root, rel_path, spawn_walk, PathFilters, StreamIter,
+};
 use crate::RgApiError;
 
 /// One blank-line-delimited block containing a match, or context for one.
@@ -125,12 +127,13 @@ fn block_entry(
     matcher: &RegexMatcher,
     before_context: usize,
     after_context: usize,
+    max_depth: Option<usize>,
 ) -> Result<Vec<SearchBlock>, RgApiError> {
-    let dent = entry.map_err(|e| RgApiError::new(e.to_string()))?;
+    let dent = match entry {
+        Ok(dent) => dent,
+        Err(err) => return entry_err(err, max_depth).map_or(Ok(Vec::new()), Err),
+    };
     let path = dent.path();
-    if path == root {
-        return Ok(Vec::new());
-    }
     let Some(ft) = dent.file_type() else {
         return Ok(Vec::new());
     };
@@ -151,16 +154,10 @@ fn block_entry(
 pub type BlockIter = StreamIter<SearchBlock>;
 
 pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
-    let (root_in, includes, max_depth, ignore, hidden) = resolve_root(
-        &opts.root,
-        &opts.includes,
-        opts.max_depth,
-        opts.ignore,
-        opts.hidden,
-    );
-    let root = normalize_root(&root_in)?;
+    let (ignore, hidden) = file_root_flags(&opts.root, opts.ignore, opts.hidden);
+    let root = normalize_root(&opts.root)?;
     let filters = Arc::new(PathFilters::new(
-        &includes,
+        &opts.includes,
         &opts.excludes,
         &opts.exts,
         opts.path_re.as_deref(),
@@ -169,12 +166,13 @@ pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
         opts.skip_dir_re.as_deref(),
     )?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case)?;
-    let (before_context, after_context) = (opts.before_context, opts.after_context);
+    let (before_context, after_context, max_depth) =
+        (opts.before_context, opts.after_context, opts.max_depth);
     Ok(spawn_walk(
         root,
         ignore,
         hidden,
-        max_depth,
+        opts.max_depth,
         opts.min_depth,
         opts.max_filesize,
         opts.follow_links,
@@ -187,6 +185,7 @@ pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
             &matcher,
             before_context,
             after_context,
+            max_depth,
         ) {
             Ok(blocks) => {
                 for block in blocks {

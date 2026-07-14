@@ -9,9 +9,10 @@ It uses the same `ignore`, `grep-regex`, and `grep-searcher` crates that ripgrep
 For common file discovery and search:
 
 ```python
-from rgapi import fd, rg, rg_iter
+from rgapi import fd, ls, rg, rg_iter
 
 fd(".", ext="py", exclude="test_*.py")
+ls("src")
 for row in rg_iter("TODO", ".", include="*.py", context=2): print(row.asdict())
 rg("TODO", ".", ext="py", skip_dir=".venv", paths=True)
 ```
@@ -60,6 +61,8 @@ pip install rgapi
 
 `fd` adds fd-like filtering on top of `walk`: `pattern` is a smart-case regex matched against each basename, and `include`/`exclude` use glob syntax. Lowercase patterns match case-insensitively; a pattern containing uppercase letters is case-sensitive. Use `path_re` when matching the slash-separated relative path instead. `glob=` is accepted as an alias for `include=`. A basename glob such as `*.py` also matches recursively, so it finds `src/app.py`. Use `ext="py"` or `ext=["py", "rs"]` for extension filters, which compose as AND with `include`/`glob` (so `include="src/*", ext="py"` means `src/*` *and* `*.py`, like combining `rg -g` with `-t`); use `min_depth=`/`max_depth=` to bound recursion, and `max_filesize=` to skip files above a byte limit.
 
+`ls` lists like the shell command: it is `fd` with defaults flipped to one level (`max_depth=1`), directories included, ignore rules off, and results sorted by name. `hidden=True` is `ls -a`, and every `fd` filter still applies.
+
 `path_re` and `skip_path_re` are regex filters on slash-separated relative paths. They filter returned paths or searched files, but do not control traversal. `skip_dir` uses glob syntax to prune matching directory subtrees, and `skip_dir_re` does the same with regex.
 
 `rg` and `rg_iter` return structured rows rather than raw CLI text. They accept the same `include`, `exclude`, `glob`, `ext`, `path_re`, `skip_path_re`, `skip_dir`, `skip_dir_re`, `min_depth`, `max_depth`, `max_filesize`, `follow_links`, and `same_file_system` filters as `fd`. Each row is a `SearchLine` with:
@@ -77,7 +80,7 @@ matches      list of (start, end) byte offsets for match rows
 
 `SearchLine` has a structured `repr`, an rg-style `str` (the `line` is truncated to 120 chars with a trailing `…` for display; `repr` and `asdict()` keep the full line), and `SearchLine.asdict()` returns row fields as a plain Python dict. Pass `rg(..., lnhash=True)` or `rg_iter(..., lnhash=True)` to show `lnhash` addresses instead of line numbers in row display while keeping `line_number` available. `rg(..., paths=True)` returns unique matched paths, and `rg(..., count=True)` returns the total number of match spans. `paths` and `count` cannot both be set.
 
-`fd`, `walk`, and `rg(..., paths=True)` return `PathResults`, a list subclass displayed one path per line. `rg(..., timeout_ms=200)` stops the search at the deadline and returns whatever was collected by then. Results record how they ended: `stop_reason` is `None` for a complete result, `"max_results"` when truncated by `max_results`, or `"timeout"` when a deadline hit, and `complete` is true when `stop_reason` is `None`. `count=True` returns a plain int, which cannot carry the flag, so it rejects `timeout_ms`.
+`fd`, `walk`, `ls`, and `rg(..., paths=True)` return `PathResults`, a list of `FileEntry` rows. A `FileEntry` is a `str` subclass holding the relative path, so all string uses keep working, and it stats itself lazily on first access: `stat` is a cached `os.lstat` result (`None` if the path has vanished), with `size`, `mtime`, and `is_dir` derived from it. A `PathResults` displays as an `ls -l`-style long listing, capped at `rgapi.MAX_REPR` rows with a final `… N more` line, so stats are read only for displayed rows; `str()` is still one plain path per line, and `list(res)` shows plain paths. `rg(..., timeout_ms=200)` stops the search at the deadline and returns whatever was collected by then. Results record how they ended: `stop_reason` is `None` for a complete result, `"max_results"` when truncated by `max_results`, or `"timeout"` when a deadline hit, and `complete` is true when `stop_reason` is `None`. `count=True` returns a plain int, which cannot carry the flag, so it rejects `timeout_ms`.
 
 `before_context`, `after_context`, and `context` are like `rg -B`, `rg -A`, and `rg -C`. Files containing NUL bytes or invalid UTF-8 are skipped.
 

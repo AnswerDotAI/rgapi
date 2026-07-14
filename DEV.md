@@ -48,4 +48,6 @@ Async API: `fda`, `rga`, `rga_iter`, `nbrga`, and `nbrga_iter` wrap the correspo
 
 Truncation is recorded on collected results: `max_results` sets `stop_reason="max_results"`, and `timeout_ms` on `rg`/`rga`/`nbrg`/`nbrga` sets `stop_reason="timeout"`. `SearchResults`, `BlockResults`, `PathResults`, and `NbResults` share this through `_Results`; `complete` means `stop_reason is None`. In block summary mode, `max_results` counts matching blocks and keeps their block context. `count=True` returns a plain int, so it rejects timeouts and block summary mode.
 
+Path results are `FileEntry` rows: a `str` subclass carrying the walk root, so paths stay plain strings for compatibility while stat info loads lazily (one cached `os.lstat` per entry, read only on attribute access). The wrapping happens at result construction on the Python side; Rust still streams plain strings. `PathResults.__repr__` shows an `ls -l`-style listing capped at `MAX_REPR` rows, so a huge result never stats everything, while `str()` stays one plain path per line. `ls` is `fd` with shell-style defaults (one level, dirs, ignore rules off), re-sorted with `stop_reason` preserved.
+
 This package intentionally has no CLI. Python is the interface.

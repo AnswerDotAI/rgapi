@@ -4,7 +4,7 @@ from contextlib import aclosing
 import pytest
 from fastcore.aio import run_sync
 
-from rgapi import PathResults, fd, fda, rg, rga, rga_iter
+from rgapi import FileEntry, PathResults, fd, fda, rg, rga, rga_iter
 from test_rgapi import make_tree
 
 
@@ -18,7 +18,7 @@ def _more(tmp_path):
 def test_async_results_match_sync(tmp_path):
     _more(tmp_path)
     found = run_sync(fda(tmp_path))
-    assert type(found) is PathResults and sorted(found) == sorted(fd(tmp_path))
+    assert type(found) is PathResults and type(found[0]) is FileEntry and sorted(found) == sorted(fd(tmp_path))
     assert sorted(run_sync(fda(tmp_path, glob="*.py"))) == sorted(fd(tmp_path, glob="*.py"))
     assert srt(run_sync(rga("TODO", tmp_path))) == srt(rg("TODO", tmp_path))
     assert run_sync(rga("TODO", tmp_path, count=True)) == rg("TODO", tmp_path, count=True)

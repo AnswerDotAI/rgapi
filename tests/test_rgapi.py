@@ -401,7 +401,9 @@ def test_max_results_and_count(tmp_path):
     # context lines ride along with kept matches only
     ctx = rg("TODO", str(tmp_path), context=1, max_results=1)
     assert [r.kind for r in ctx].count("match") == 1
-    assert rg("TODO", str(tmp_path), paths=True, max_results=1) == ["src/app.py"]
+    capped = rg("TODO", str(tmp_path), paths=True, max_results=1)
+    assert len(capped) == 1 and capped[0] in ("src/app.py", "src/more.py")  # winner is racy: order is not contractual
+    assert capped.stop_reason == "max_results"
     try: rg("TODO", str(tmp_path), count=True, max_results=1)
     except AssertionError as e: assert "mutually exclusive" in str(e)
     else: assert False
@@ -453,3 +455,65 @@ def test_nbrg_stop_reason(tmp_path):
     assert nbrg("foo", str(tmp_path), timeout_ms=10_000).complete
     assert nbrg("foo", str(tmp_path), timeout_ms=0).stop_reason == "timeout"
     with pytest.raises(AssertionError): nbrg("foo", str(tmp_path), count=True, timeout_ms=1)
+
+
+def test_fileentry_and_ls(tmp_path):
+    import rgapi
+    from rgapi import FileEntry, ls
+    make_tree(tmp_path)
+    found = fd(tmp_path)
+    e = next(p for p in found if p == "src/app.py")
+    assert type(e) is FileEntry and isinstance(e, str)
+    st = e.stat
+    assert st is not None and e.stat is st                    # lazy stat, cached
+    assert e.size == st.st_size and not e.is_dir
+    assert abs(e.mtime.timestamp() - st.st_mtime) < 2
+    assert isinstance(walk(tmp_path)[0], FileEntry)
+    assert isinstance(rg("TODO", tmp_path, paths=True)[0], FileEntry)
+
+    r = repr(found)                                           # long format by default
+    line = next(l for l in r.splitlines() if l.endswith("src/app.py"))
+    assert line.startswith("-") and str(st.st_size) in line
+    assert str(found) == "\n".join(found)                     # str() stays plain paths
+    assert "src/app.py" in e._repr_markdown_()
+
+    gone = FileEntry("nope.txt", str(tmp_path))               # vanished files render, not raise
+    assert gone.stat is None and gone.size is None and not gone.is_dir
+    assert "?" in repr(PathResults([gone]))
+
+    pr = PathResults(FileEntry(f"f{i}", str(tmp_path)) for i in range(rgapi.MAX_REPR + 50))
+    r = repr(pr)
+    assert len(r.splitlines()) == rgapi.MAX_REPR + 1 and "50 more" in r
+    pr.stop_reason = "timeout"
+    assert "timeout" in repr(pr)
+
+    res = ls(tmp_path)
+    assert type(res) is PathResults and list(res) == sorted(res)
+    assert "src" in res and "ignored.txt" in res              # dirs listed; ignore files not consulted
+    assert "src/app.py" not in res and ".hidden" not in res   # one level, hidden off
+    assert ".hidden" in ls(tmp_path, hidden=True)
+
+
+def test_file_root_ignores_siblings_and_depth_cap_permissions(tmp_path):
+    f = tmp_path / "f.txt"
+    f.write_text("hello x\n")
+    (tmp_path / ".gitignore").write_text("f.txt\n.hid.txt\n")
+    hid = tmp_path / ".hid.txt"
+    hid.write_text("hello x\n")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "g.txt").write_text("x\n")
+    locked.chmod(0o000)
+    try:
+        assert [r.path for r in rg("x", f)] == ["f.txt"]          # sibling perms irrelevant to file root
+        assert [r.path for r in rg("x", hid)] == [".hid.txt"]     # hidden+ignored file root still searched
+        assert list(fd(f)) == ["f.txt"]                           # fd file root; sibling perms irrelevant
+        assert fd(f)[0].size == 8                                 # FileEntry stat resolves correctly
+        got = sorted({r.path for r in rg("x", tmp_path, max_depth=1, ignore=False, hidden=True)})
+        assert got == [".gitignore", ".hid.txt", "f.txt"]                       # depth-cap dir skipped silently
+        assert list(fd(tmp_path, max_depth=1, ignore=False)) == ["f.txt"]
+        with pytest.raises(ValueError, match="ermission"):
+            rg("x", tmp_path)                                     # uncapped: unreadable dir in tree is fatal
+        with pytest.raises(ValueError, match="ermission"):
+            rg("x", tmp_path, max_depth=2)                        # cap above the dir: descent needed, fatal
+    finally: locked.chmod(0o755)

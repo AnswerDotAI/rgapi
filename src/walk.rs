@@ -67,16 +67,10 @@ pub fn find_cancelable(
     opts: &FindOptions,
     cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<Vec<String>, RgApiError> {
-    let (root_in, includes, max_depth, ignore, hidden) = resolve_root(
-        &opts.root,
-        &opts.includes,
-        opts.max_depth,
-        opts.ignore,
-        opts.hidden,
-    );
-    let root = normalize_root(&root_in)?;
+    let (ignore, hidden) = file_root_flags(&opts.root, opts.ignore, opts.hidden);
+    let root = normalize_root(&opts.root)?;
     let filters = Arc::new(PathFilters::new(
-        &includes,
+        &opts.includes,
         &opts.excludes,
         &opts.exts,
         opts.path_re.as_deref(),
@@ -89,7 +83,7 @@ pub fn find_cancelable(
         &mut walker,
         ignore,
         hidden,
-        max_depth,
+        opts.max_depth,
         opts.min_depth,
         opts.max_filesize,
         opts.follow_links,
@@ -106,6 +100,7 @@ pub fn find_cancelable(
     let files = opts.files;
     let dirs = opts.dirs;
     let panic_probe = opts.panic_probe;
+    let max_depth = opts.max_depth;
     walker.build_parallel().run(|| {
         let tx = tx.clone();
         let root = root.clone();
@@ -122,7 +117,15 @@ pub fn find_cancelable(
                 if panic_probe {
                     panic!("rgapi: deliberate panic for tests (panic_probe)");
                 }
-                find_entry(entry, &root, &filters, pattern.as_deref(), files, dirs)
+                find_entry(
+                    entry,
+                    &root,
+                    &filters,
+                    pattern.as_deref(),
+                    files,
+                    dirs,
+                    max_depth,
+                )
             }))
             .unwrap_or_else(|_| {
                 Err(RgApiError::new(
@@ -263,15 +266,19 @@ fn find_entry(
     pattern: Option<&RegexMatcher>,
     files: bool,
     dirs: bool,
+    max_depth: Option<usize>,
 ) -> Result<Option<String>, RgApiError> {
-    let dent = entry.map_err(|e| RgApiError::new(e.to_string()))?;
+    let dent = match entry {
+        Ok(dent) => dent,
+        Err(err) => return entry_err(err, max_depth).map_or(Ok(None), Err),
+    };
     let path = dent.path();
-    if path == root {
-        return Ok(None);
-    }
     let Some(ft) = dent.file_type() else {
         return Ok(None);
     };
+    if path == root && ft.is_dir() {
+        return Ok(None);
+    }
     if ft.is_file() && !files {
         return Ok(None);
     }
@@ -294,39 +301,30 @@ fn find_entry(
     Ok(Some(rel))
 }
 
-// If `root` is a file, rewrite the walk to its parent directory matching only that file, so
-// passing a filename as `root` searches just that file (like `rg FILE`). Returns the walk root,
-// includes, and the max_depth/ignore/hidden to use (depth 1, ignore/hidden off so the named file
-// is always found). For a directory, returns the inputs unchanged.
-pub(crate) fn resolve_root(
-    root: &Path,
-    includes: &[String],
-    max_depth: Option<usize>,
-    ignore: bool,
-    hidden: bool,
-) -> (PathBuf, Vec<String>, Option<usize>, bool, bool) {
+// An explicitly named file is always searched, like `rg FILE`: for a file root,
+// disable ignore rules and include hidden. Nothing is traversed below a file, so
+// the flags affect only the root itself.
+pub(crate) fn file_root_flags(root: &Path, ignore: bool, hidden: bool) -> (bool, bool) {
     if root.is_file() {
-        if let Some(name) = root.file_name() {
-            let parent = match root.parent() {
-                Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
-                _ => PathBuf::from("."),
-            };
-            return (
-                parent,
-                vec![globset::escape(&name.to_string_lossy())],
-                Some(1),
-                false,
-                true,
-            );
-        }
+        (false, true)
+    } else {
+        (ignore, hidden)
     }
-    (
-        root.to_path_buf(),
-        includes.to_vec(),
-        max_depth,
-        ignore,
-        hidden,
-    )
+}
+
+// At the max_depth cap the walker opens directories it will never descend into
+// (readdir precedes the depth check in `ignore`), so permission failures there are
+// harmless: skip them (None). Every other walk error is fatal (Some).
+pub(crate) fn entry_err(err: ignore::Error, max_depth: Option<usize>) -> Option<RgApiError> {
+    let at_cap = max_depth.is_some_and(|m| err.depth().is_some_and(|d| d >= m));
+    let denied = err
+        .io_error()
+        .is_some_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
+    if at_cap && denied {
+        None
+    } else {
+        Some(RgApiError::new(err.to_string()))
+    }
 }
 
 pub(crate) fn normalize_root(path: &Path) -> Result<PathBuf, RgApiError> {
@@ -341,10 +339,14 @@ pub(crate) fn normalize_root(path: &Path) -> Result<PathBuf, RgApiError> {
 }
 
 pub(crate) fn rel_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    if rel.as_os_str().is_empty() {
+        // A file root strips to nothing: report its name, matching the old parent-walk output.
+        return path
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().replace('\\', "/"));
+    }
+    rel.to_string_lossy().replace('\\', "/")
 }
 
 pub(crate) fn configure_walker(

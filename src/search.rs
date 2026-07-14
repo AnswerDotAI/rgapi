@@ -14,7 +14,9 @@ use grep_searcher::{
 };
 use ignore::{DirEntry, WalkState};
 
-use crate::walk::{normalize_root, rel_path, resolve_root, spawn_walk, PathFilters, StreamIter};
+use crate::walk::{
+    entry_err, file_root_flags, normalize_root, rel_path, spawn_walk, PathFilters, StreamIter,
+};
 use crate::RgApiError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,16 +110,10 @@ pub fn rg(opts: &RgOptions) -> Result<Vec<SearchLine>, RgApiError> {
 }
 
 pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
-    let (root_in, includes, max_depth, ignore, hidden) = resolve_root(
-        &opts.root,
-        &opts.includes,
-        opts.max_depth,
-        opts.ignore,
-        opts.hidden,
-    );
-    let root = normalize_root(&root_in)?;
+    let (ignore, hidden) = file_root_flags(&opts.root, opts.ignore, opts.hidden);
+    let root = normalize_root(&opts.root)?;
     let filters = Arc::new(PathFilters::new(
-        &includes,
+        &opts.includes,
         &opts.excludes,
         &opts.exts,
         opts.path_re.as_deref(),
@@ -126,13 +122,17 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
         opts.skip_dir_re.as_deref(),
     )?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case)?;
-    let (before_context, after_context, panic_probe) =
-        (opts.before_context, opts.after_context, opts.panic_probe);
+    let (before_context, after_context, panic_probe, max_depth) = (
+        opts.before_context,
+        opts.after_context,
+        opts.panic_probe,
+        opts.max_depth,
+    );
     Ok(spawn_walk(
         root,
         ignore,
         hidden,
-        max_depth,
+        opts.max_depth,
         opts.min_depth,
         opts.max_filesize,
         opts.follow_links,
@@ -149,6 +149,7 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
                 &matcher,
                 before_context,
                 after_context,
+                max_depth,
                 tx,
                 cancel,
             )
@@ -165,6 +166,7 @@ fn search_entry(
     matcher: &RegexMatcher,
     before_context: usize,
     after_context: usize,
+    max_depth: Option<usize>,
     tx: &SyncSender<Result<SearchLine, RgApiError>>,
     cancel: &Arc<AtomicBool>,
 ) -> WalkState {
@@ -173,12 +175,14 @@ fn search_entry(
     }
     let dent = match entry {
         Ok(dent) => dent,
-        Err(err) => return send_search_error(tx, RgApiError::new(err.to_string())),
+        Err(err) => {
+            return match entry_err(err, max_depth) {
+                Some(e) => send_search_error(tx, e),
+                None => WalkState::Continue,
+            }
+        }
     };
     let path = dent.path();
-    if path == root {
-        return WalkState::Continue;
-    }
     let Some(ft) = dent.file_type() else {
         return WalkState::Continue;
     };

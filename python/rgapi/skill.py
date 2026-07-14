@@ -3,7 +3,8 @@
 rgapi wraps the same `ignore`, `grep-regex`, and `grep-searcher` crates ripgrep uses, so `.gitignore`/`.ignore`/`.rgignore`, hidden-file handling, glob/ext filters, and regex matching all behave like `rg`. Walking and searching run in parallel and most work stays in Rust, so results come back as structured Python objects instead of CLI text to parse. Prefer rgapi over shelling out to `rg`/`fd` or scanning files by hand: you get typed rows, byte-offset match spans, and lazy iteration.
 
 Core APIs:
-- `fd(root=".", ...)` finds paths with fd-style filters (`pattern` smart-case basename regex, `include`/`exclude`/`glob`, `ext`); returns slash-separated relative paths.
+- `fd(root=".", ...)` finds paths with fd-style filters (`pattern` smart-case basename regex, `include`/`exclude`/`glob`, `ext`); returns slash-separated relative paths as `FileEntry` rows: `str` subclasses that lazily stat themselves for `size`/`mtime`/`is_dir`/`stat`. The list displays as an `ls -l`-style table (capped at `rgapi.MAX_REPR` rows); `str(res)` or `list(res)` give plain paths.
+- `ls(root=".", ...)` lists like the shell `ls`: one level, directories included, ignore rules off, sorted by name. It is `fd` with different defaults, so every `fd` filter works; `hidden=True` is `ls -a`.
 - `rg(pattern, root=".", ...)` returns matching `SearchLine` rows. `summary=True` instead returns blank-line-delimited `SearchBlock` rows, with newlines escaped and `maxlen` source characters shown per block. Context is line-based normally and block-based in summary mode. `paths=True` returns unique paths, `count=True` returns a match-span total, and `lnhash=True` shows exhash addresses. `summary=True` is incompatible with `paths` and `count`, but combines with `lnhash` to show copyable block boundaries.
 - `nbrg(pattern, root=".", cell_context=0, maxlen=120, ...)` searches Jupyter `.ipynb` files (cell source only) and returns matched cells as `NbResults`/`NbCell`. Its display is always a one-line cell summary. Use this for notebooks rather than `rg`, to avoid escaped JSON and get stable cell ids.
 
@@ -36,6 +37,6 @@ Important:
 Traversal is parallel and result order is NOT guaranteed; wrap in `sorted(...)` if you need stable order. `path_re`/`skip_path_re` filter the returned/searched paths but do not prune traversal; use `skip_dir`/`skip_dir_re` to prune whole subtrees for speed. Run `doc(func)` for full parameter docments.
 """
 
-from . import RgIter, fd, nbrg, rg, rg_iter
+from . import RgIter, fd, ls, nbrg, rg, rg_iter
 
-__all__ = [ "RgIter", "fd", "rg", "rg_iter", "nbrg" ]
+__all__ = [ "RgIter", "fd", "ls", "rg", "rg_iter", "nbrg" ]

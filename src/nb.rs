@@ -8,7 +8,9 @@ use ignore::{DirEntry, WalkState};
 use serde::Deserialize;
 
 use crate::search::{compile_regex, search_text, SearchLine};
-use crate::walk::{normalize_root, rel_path, resolve_root, spawn_walk, PathFilters, StreamIter};
+use crate::walk::{
+    entry_err, file_root_flags, normalize_root, rel_path, spawn_walk, PathFilters, StreamIter,
+};
 use crate::RgApiError;
 
 #[derive(Debug, Clone)]
@@ -177,12 +179,13 @@ fn nb_entry(
     filters: &PathFilters,
     matcher: &RegexMatcher,
     cell_context: usize,
+    max_depth: Option<usize>,
 ) -> Result<Vec<NbCell>, RgApiError> {
-    let dent = entry.map_err(|e| RgApiError::new(e.to_string()))?;
+    let dent = match entry {
+        Ok(dent) => dent,
+        Err(err) => return entry_err(err, max_depth).map_or(Ok(Vec::new()), Err),
+    };
     let path = dent.path();
-    if path == root {
-        return Ok(Vec::new());
-    }
     let Some(ft) = dent.file_type() else {
         return Ok(Vec::new());
     };
@@ -203,16 +206,10 @@ fn nb_entry(
 pub type NbIter = StreamIter<NbCell>;
 
 pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
-    let (root_in, includes, max_depth, ignore, hidden) = resolve_root(
-        &opts.root,
-        &opts.includes,
-        opts.max_depth,
-        opts.ignore,
-        opts.hidden,
-    );
-    let root = normalize_root(&root_in)?;
+    let (ignore, hidden) = file_root_flags(&opts.root, opts.ignore, opts.hidden);
+    let root = normalize_root(&opts.root)?;
     let filters = Arc::new(PathFilters::new(
-        &includes,
+        &opts.includes,
         &opts.excludes,
         &opts.exts,
         opts.path_re.as_deref(),
@@ -222,11 +219,12 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
     )?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case)?;
     let cell_context = opts.cell_context;
+    let max_depth = opts.max_depth;
     Ok(spawn_walk(
         root,
         ignore,
         hidden,
-        max_depth,
+        opts.max_depth,
         opts.min_depth,
         opts.max_filesize,
         opts.follow_links,
@@ -238,6 +236,7 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
             filters,
             &matcher,
             cell_context,
+            max_depth,
         ) {
             Ok(cells) => {
                 for cell in cells {
