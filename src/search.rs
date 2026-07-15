@@ -1,5 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -257,9 +255,7 @@ pub fn compile_regex(
 }
 
 fn line_hash_u16(line: &str) -> u16 {
-    let mut h = DefaultHasher::new();
-    line.hash(&mut h);
-    (h.finish() & 0xffff) as u16
+    (crc32fast::hash(line.as_bytes()) & 0xffff) as u16
 }
 
 pub(crate) fn format_lnhash(lineno: u64, line: &str) -> String {

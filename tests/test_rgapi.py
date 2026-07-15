@@ -126,6 +126,13 @@ def test_depth_size_and_filesystem_options(tmp_path):
     assert [r.path for r in rg("TODO", str(tmp_path), min_depth=2, max_filesize=5)] == ["sub/small.txt"]
 
 
+def test_lnhash_matches_stdlib_crc32(tmp_path):
+    import zlib
+    make_tree(tmp_path)
+    row = rg("TODO", str(tmp_path))[0]
+    assert row.lnhash == f"{row.line_number}|{zlib.crc32(row.line.encode()) & 0xffff:04x}|"
+
+
 def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
     make_tree(tmp_path)
     res = rg("TODO", str(tmp_path), context=1)
