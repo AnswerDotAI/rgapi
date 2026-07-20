@@ -2,7 +2,7 @@ import asyncio, os
 from contextlib import aclosing
 from datetime import datetime
 from functools import cached_property
-from stat import S_ISDIR, filemode
+from stat import S_ISDIR, S_ISLNK, filemode
 
 from os import fspath
 from pathlib import Path
@@ -42,10 +42,10 @@ def _hsize(n):
     return f"{n:.0f}" if u == "B" else f"{n:.1f}{u}"
 
 class FileEntry(str):
-    "Relative path that lazily stats itself for `size`/`mtime`/`is_dir` and `ls -l`-style display"
-    def __new__(cls, path, root="."):
+    "Relative path that lazily stats itself for `size`/`mtime`/`is_dir`/`link_target` and `ls -l`-style display"
+    def __new__(cls, path, root=".", show_target=False):
         self = super().__new__(cls, path)
-        self.root = os.path.abspath(root)
+        self.root,self.show_target = os.path.abspath(root),show_target
         return self
     @cached_property
     def stat(self):
@@ -58,18 +58,25 @@ class FileEntry(str):
     def mtime(self): return None if self.stat is None else datetime.fromtimestamp(self.stat.st_mtime)
     @property
     def is_dir(self): return self.stat is not None and S_ISDIR(self.stat.st_mode)
+    @cached_property
+    def link_target(self):
+        "`os.readlink` result for a symlink; `None` otherwise"
+        if self.stat is None or not S_ISLNK(self.stat.st_mode): return None
+        try: return os.readlink(os.path.join(self.root, self))
+        except OSError: return None
     def _line(self):
         if self.stat is None: return f"{'?':10} {'?':>7} {'?':16} {self}"
-        return f"{filemode(self.stat.st_mode)} {_hsize(self.stat.st_size):>7} {self.mtime:%Y-%m-%d %H:%M} {self}"
+        tgt = f" -> {self.link_target}" if self.show_target and self.link_target is not None else ""
+        return f"{filemode(self.stat.st_mode)} {_hsize(self.stat.st_size):>7} {self.mtime:%Y-%m-%d %H:%M} {self}{tgt}"
     def _repr_markdown_(self): return f"`{self._line()}`"
 
 def _entry_root(root):
     "Stat base for `FileEntry`: a file root's entries are named relative to its parent"
     return os.path.dirname(root) if os.path.isfile(root) else root
 
-def _fe(paths, root):
+def _fe(paths, root, show_target=False):
     root = _entry_root(root)
-    return (FileEntry(p, root) for p in paths)
+    return (FileEntry(p, root, show_target) for p in paths)
 
 class PathResults(_Results):
     "List of relative `FileEntry` paths; repr is `ls -l`-style, `str()` is line-per-path"
@@ -113,7 +120,7 @@ def walk(
     same_file_system:bool=False, # Do not cross filesystem boundaries
     path_re:str|None=None, # Regex that returned relative paths must match
     skip_path_re:str|None=None, # Regex for relative paths to skip
-    skip_dir=None, # Directory glob or globs to prune
+    skip_dir:str|list|None=None, # Directory glob or globs to prune
     skip_dir_re:str|None=None, # Directory regex used to prune traversal
     files:bool=True, # Include files in results
     dirs:bool=False # Include directories in results
@@ -125,10 +132,10 @@ def walk(
 
 
 def _walk_args(
-    glob=None, # Include glob or globs; alias for `include`
-    include=None, # Include glob or globs, e.g. `*.py`
-    exclude=None, # Exclude glob or globs, e.g. `test_*.py`
-    ext=None, # Extension or extensions to require, without needing `*.`; ANDs with `include`/`glob`
+    glob:str|list|None=None, # Include glob or globs; alias for `include`
+    include:str|list|None=None, # Include glob or globs, e.g. `*.py`
+    exclude:str|list|None=None, # Exclude glob or globs, e.g. `test_*.py`
+    ext:str|list|None=None, # Extension or extensions to require, without needing `*.`; ANDs with `include`/`glob`
     hidden:bool=False, # Include hidden files and directories
     ignore:bool=True, # Respect `.gitignore` and other ignore files
     max_depth:int|None=None, # Maximum directory depth to descend
@@ -138,7 +145,7 @@ def _walk_args(
     same_file_system:bool=False, # Do not cross filesystem boundaries
     path_re:str|None=None, # Regex that relative paths must match
     skip_path_re:str|None=None, # Regex for relative paths to skip
-    skip_dir=None, # Directory glob or globs to prune
+    skip_dir:str|list|None=None, # Directory glob or globs to prune
     skip_dir_re:str|None=None, # Directory regex used to prune traversal
 ):
     "Walk/filter positional tail for `_core` calls; delegators pass their `**kwargs` here whole"
@@ -152,11 +159,12 @@ def fd(
     pattern:str|None=None, # Smart-case regex matched against each basename
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
+    show_target:bool=False, # Append `-> target` to symlink rows in the display
     **kwargs
 ) -> PathResults:
     "Find paths with fd-style filters and gitignore support."
     rt = _fs_path(root)
-    return PathResults(_fe(_core.find(rt, pattern, *_walk_args(**kwargs), files, dirs), rt))
+    return PathResults(_fe(_core.find(rt, pattern, *_walk_args(**kwargs), files, dirs), rt, show_target))
 
 
 @delegates(fd)
@@ -257,13 +265,13 @@ def rg(
     paths:bool=False, # Return unique matched paths instead of rows
     count:bool=False, # Return total match span count instead of rows
     max_results:int|None=None, # Stop after this many matching rows; context rows of kept matches are included
-    lnhash:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
+    lnhashs:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
     summary:bool=False, # Return one newline-escaped line per blank-line-delimited block?
     maxlen:int=120, # Maximum source characters per displayed block
     **kwargs
 ):
-    "Search files and return `SearchResults`, matched paths, or a count; `lnhash=True` shows exhash-style addresses."
+    "Search files and return `SearchResults`, matched paths, or a count; `lnhashs=True` shows exhash-style addresses."
     assert not (paths and count), "paths and count are mutually exclusive"
     assert not (count and max_results), "count and max_results are mutually exclusive"
     assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
@@ -274,7 +282,7 @@ def rg(
     args = (pattern, rt, *_walk_args(**kwargs), case_sensitive, smart_case, before_context, after_context)
     if summary:
         rows,timed_out = _core.block_search(*args, timeout_ms)
-        return _block_post(rows, max_results, before_context, after_context, timed_out, maxlen, lnhash)
+        return _block_post(rows, max_results, before_context, after_context, timed_out, maxlen, lnhashs)
     if count: return sum(len(row.matches) for row in _core.rg_iter(*args) if row.kind == "match")
     if paths and timeout_ms is None:
         seen, res, capped, er = set(), [], False, _entry_root(rt)
@@ -286,7 +294,7 @@ def rg(
                 capped = True
                 break
         return _mk_results(PathResults, res, capped, False)
-    rows, timed_out = _core.rg(*args, lnhash, timeout_ms)
+    rows, timed_out = _core.rg(*args, lnhashs, timeout_ms)
     return _rg_post(rows, paths, False, max_results, timed_out, rt)
 
 
@@ -299,13 +307,13 @@ def rg_iter(
     before_context:int=0, # Lines of context before each match, like `rg -B`
     after_context:int=0, # Lines of context after each match, like `rg -A`
     context:int=0, # Sets both before and after context, like `rg -C`
-    lnhash:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
+    lnhashs:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     **kwargs
 ) -> RgIter:
-    "Search files lazily, yielding `SearchLine` rows; `lnhash=True` shows exhash-style addresses."
+    "Search files lazily, yielding `SearchLine` rows; `lnhashs=True` shows exhash-style addresses."
     before_context, after_context = _context(context, before_context, after_context)
     return _core.rg_iter(pattern, _fs_path(root), *_walk_args(**kwargs),
-        case_sensitive, smart_case, before_context, after_context, lnhash)
+        case_sensitive, smart_case, before_context, after_context, lnhashs)
 
 
 @delegates(_walk_args)
@@ -320,7 +328,7 @@ async def rga(
     paths:bool=False, # Return unique matched paths instead of rows
     count:bool=False, # Return total match span count instead of rows
     max_results:int|None=None, # Stop after this many matching rows; context rows of kept matches are included
-    lnhash:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
+    lnhashs:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
     summary:bool=False, # Return one newline-escaped line per blank-line-delimited block?
     maxlen:int=120, # Maximum source characters per displayed block
@@ -337,8 +345,8 @@ async def rga(
     args = (pattern, rt, *_walk_args(**kwargs), case_sensitive, smart_case, before_context, after_context)
     if summary:
         rows,timed_out = await _acall(_core.block_search_async, *args, timeout_ms)
-        return _block_post(rows, max_results, before_context, after_context, timed_out, maxlen, lnhash)
-    rows, timed_out = await _acall(_core.rg_async, *args, lnhash, timeout_ms)
+        return _block_post(rows, max_results, before_context, after_context, timed_out, maxlen, lnhashs)
+    rows, timed_out = await _acall(_core.rg_async, *args, lnhashs, timeout_ms)
     return _rg_post(rows, paths, count, max_results, timed_out, rt)
 
 
@@ -369,14 +377,14 @@ async def rga_iter(
     before_context:int=0, # Lines of context before each match, like `rg -B`
     after_context:int=0, # Lines of context after each match, like `rg -A`
     context:int=0, # Sets both before and after context, like `rg -C`
-    lnhash:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
+    lnhashs:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     batch_max:int=512, # Largest batch of rows delivered to the event loop at once
     **kwargs
 ):
     "Async `rg_iter`: yield `SearchLine` rows as they are found; early exit cancels the search."
     before_context, after_context = _context(context, before_context, after_context)
     async with aclosing(_abatches(_core.rg_iter_async, batch_max, pattern, _fs_path(root), *_walk_args(**kwargs),
-        case_sensitive, smart_case, before_context, after_context, lnhash)) as batches:
+        case_sensitive, smart_case, before_context, after_context, lnhashs)) as batches:
         async for rows in batches:
             for row in rows: yield row
 

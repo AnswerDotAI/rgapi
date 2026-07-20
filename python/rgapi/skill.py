@@ -3,10 +3,15 @@
 rgapi wraps the same `ignore`, `grep-regex`, and `grep-searcher` crates ripgrep uses, so `.gitignore`/`.ignore`/`.rgignore`, hidden-file handling, glob/ext filters, and regex matching all behave like `rg`. Walking and searching run in parallel and most work stays in Rust, so results come back as structured Python objects instead of CLI text to parse. Prefer rgapi over shelling out to `rg`/`fd` or scanning files by hand: you get typed rows, byte-offset match spans, and lazy iteration.
 
 Core APIs:
-- `fd(root=".", ...)` finds paths with fd-style filters (`pattern` smart-case basename regex, `include`/`exclude`/`glob`, `ext`); returns slash-separated relative paths as `FileEntry` rows: `str` subclasses that lazily stat themselves for `size`/`mtime`/`is_dir`/`stat`. The list displays as an `ls -l`-style table (capped at `rgapi.MAX_REPR` rows); `str(res)` or `list(res)` give plain paths.
+- `fd(root=".", ...)` finds paths with fd-style filters (`pattern` smart-case basename regex, `include`/`exclude`/`glob`, `ext`); returns slash-separated relative paths as `FileEntry` rows: `str` subclasses that lazily stat themselves for `size`/`mtime`/`is_dir`/`stat`. The list displays as an `ls -l`-style table (capped at `rgapi.MAX_REPR` rows); `str(res)` or `list(res)` give plain paths. Unfollowed symlinks are included, displaying with an `l` mode character; `show_target=True` appends `-> target` to their rows, and `link_target` holds it (`None` for non-links).
 - `ls(root=".", ...)` lists like the shell `ls`: one level, directories included, ignore rules off, sorted by name. It is `fd` with different defaults, so every `fd` filter works; `hidden=True` is `ls -a`.
-- `rg(pattern, root=".", ...)` returns matching `SearchLine` rows. `summary=True` instead returns blank-line-delimited `SearchBlock` rows, with newlines escaped and `maxlen` source characters shown per block. Context is line-based normally and block-based in summary mode. `paths=True` returns unique paths, `count=True` returns a match-span total, and `lnhash=True` shows exhash addresses. `summary=True` is incompatible with `paths` and `count`, but combines with `lnhash` to show copyable block boundaries.
+- `rg(pattern, root=".", ...)` returns matching `SearchLine` rows. `summary=True` instead returns blank-line-delimited `SearchBlock` rows, with newlines escaped and `maxlen` source characters shown per block. Context is line-based normally and block-based in summary mode. `paths=True` returns unique paths, `count=True` returns a match-span total, and `lnhashs=True` shows exhash addresses. `summary=True` is incompatible with `paths` and `count`, but combines with `lnhashs` to show copyable block boundaries.
 - `nbrg(pattern, root=".", cell_context=0, maxlen=120, ...)` searches Jupyter `.ipynb` files (cell source only) and returns matched cells as `NbResults`/`NbCell`. Its display is always a one-line cell summary. Use this for notebooks rather than `rg`, to avoid escaped JSON and get stable cell ids.
+
+Idiomatic usage:
+- Results display through tuned reprs designed to be read as-is: end the cell with the bare call and read what comes back - never join, slice, or otherwise reformat a result by hand. If a result is too big to take in full, narrow it with the function's own parameters (`max_results`, `paths=True`, `count=True`, tighter filters), not by post-processing the output.
+- For orientation in unfamiliar code, start with `rg(pattern, summary=True)` and drop to line-level rows only where needed; add `lnhashs=True` when an edit may follow, so hits arrive with copyable addresses.
+- In kernel sessions, reach for `ls()` rather than shell `ls`, and `fd()` rather than shell `find`, for listings you or later calls will read.
 
 SearchLine rows:
   kind         'match', 'before', 'after', or 'context'
@@ -23,7 +28,7 @@ SearchBlock rows (from `rg(summary=True)`):
   source       full block source
   matches      list of matching SearchLine rows within the block
   asdict()     returns the row fields as a plain dict
-Output uses `path:start-end:source` for matches and `path:start-end-source` for context. With `lnhash=True`, `start-end` becomes `start_lnhash,end_lnhash` (or one hash for a one-line block). Empty or whitespace-only lines delimit blocks; `context=N` adds N neighbouring blocks. Multiple matches in one block produce one row.
+Output uses `path:start-end:source` for matches and `path:start-end-source` for context. With `lnhashs=True`, `start-end` becomes `start_lnhash,end_lnhash` (or one hash for a one-line block). Empty or whitespace-only lines delimit blocks; `context=N` adds N neighbouring blocks. Multiple matches in one block produce one row.
 
 NbCell rows (from `nbrg`):
   path/cell_index/cell_id/cell_type    locate the cell ('code'/'markdown'/'raw')

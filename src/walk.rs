@@ -285,7 +285,7 @@ fn find_entry(
     if ft.is_dir() && !dirs {
         return Ok(None);
     }
-    if !ft.is_file() && !ft.is_dir() {
+    if !ft.is_file() && !ft.is_dir() && !ft.is_symlink() {
         return Ok(None);
     }
     let rel = rel_path(root, path);

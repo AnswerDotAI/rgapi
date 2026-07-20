@@ -1,5 +1,6 @@
 "Notebook-aware search: run `rg`-style search over `.ipynb` files, returning matched cells instead of raw JSON lines."
 
+from pathlib import Path
 from fastcore.meta import delegates
 
 from contextlib import aclosing
@@ -70,7 +71,7 @@ def _nb_post(rows, max_results, count, timed_out, maxlen):
 @delegates(_walk_args, but=["ext"])
 def nbrg(
     pattern:str, # Regex pattern to search for
-    root:str=".", # Directory to search (expands `~`)
+    root:str|Path=".", # Directory to search (expands `~`)
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
@@ -91,7 +92,7 @@ def nbrg(
 @delegates(_walk_args, but=["ext"])
 def nbrg_iter(
     pattern:str, # Regex pattern to search for
-    root:str=".", # Directory to search (expands `~`)
+    root:str|Path=".", # Directory to search (expands `~`)
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
@@ -106,7 +107,7 @@ def nbrg_iter(
 @delegates(_walk_args, but=["ext"])
 async def nbrga(
     pattern:str, # Regex pattern to search for
-    root:str=".", # Directory to search (expands `~`)
+    root:str|Path=".", # Directory to search (expands `~`)
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
@@ -127,7 +128,7 @@ async def nbrga(
 @delegates(_walk_args, but=["ext"])
 async def nbrga_iter(
     pattern:str, # Regex pattern to search for
-    root:str=".", # Directory to search (expands `~`)
+    root:str|Path=".", # Directory to search (expands `~`)
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior

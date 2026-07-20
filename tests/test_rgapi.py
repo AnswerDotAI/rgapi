@@ -163,12 +163,12 @@ def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
     assert str(res[0]) == "src/app.py-1-alpha"
     assert str(res[1]) == "src/app.py:2:TODO here"
     assert str(res) == "src/app.py-1-alpha\nsrc/app.py:2:TODO here\nsrc/app.py-3-omega"
-    hashed = rg("TODO", str(tmp_path), context=1, lnhash=True)
+    hashed = rg("TODO", str(tmp_path), context=1, lnhashs=True)
     assert hashed == res
     assert str(hashed[0]) == f"src/app.py-{hashed[0].lnhash}alpha"
     assert str(hashed[1]) == f"src/app.py:{hashed[1].lnhash}TODO here"
     assert str(hashed) == "\n".join(str(row) for row in hashed)
-    assert list(rg_iter("TODO", str(tmp_path), context=1, lnhash=True)) == hashed
+    assert list(rg_iter("TODO", str(tmp_path), context=1, lnhashs=True)) == hashed
     p = Pretty()
     res._repr_pretty_(p, False)
     assert p.texts == [str(res)]
@@ -210,7 +210,7 @@ def test_rg_summary_groups_blocks_with_block_context(tmp_path):
     assert res[0].asdict()["source"] == "intro one\nintro two"
     with pytest.raises(AssertionError): rg("TODO", tmp_path, summary=True, count=True)
     with pytest.raises(AssertionError): rg("TODO", tmp_path, summary=True, paths=True)
-    hashed = rg("TODO", tmp_path, summary=True, lnhash=True, maxlen=20)
+    hashed = rg("TODO", tmp_path, summary=True, lnhashs=True, maxlen=20)
     hblock = hashed[0]
     assert str(hblock) == f"a.py:{hblock.start_lnhash},{hblock.end_lnhash}:TODO first\\nline\\nTO…"
     assert hblock.asdict()["start_lnhash"] == hblock.start_lnhash
@@ -524,3 +524,14 @@ def test_file_root_ignores_siblings_and_depth_cap_permissions(tmp_path):
         with pytest.raises(ValueError, match="ermission"):
             rg("x", tmp_path, max_depth=2)                        # cap above the dir: descent needed, fatal
     finally: locked.chmod(0o755)
+
+def test_symlink_link_target_and_show_target(tmp_path):
+    (tmp_path / "real").mkdir()
+    (tmp_path / "f.txt").write_text("x\n")
+    (tmp_path / "lnk").symlink_to("real")
+    ents = {str(e): e for e in fd(str(tmp_path), files=True, dirs=True, show_target=True)}
+    assert ents["lnk"].link_target == "real"
+    assert ents["f.txt"].link_target is None
+    assert ents["lnk"]._line().startswith("l") and ents["lnk"]._line().endswith("-> real")
+    default = {str(e): e for e in fd(str(tmp_path), files=True, dirs=True)}
+    assert "->" not in default["lnk"]._line()
