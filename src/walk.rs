@@ -108,10 +108,8 @@ pub fn find_cancelable(
         let pattern = pattern.clone();
         let cancel = cancel.cloned();
         Box::new(move |entry| {
-            if let Some(c) = &cancel {
-                if c.load(Ordering::Relaxed) {
-                    return WalkState::Quit;
-                }
+            if let Some(c) = &cancel && c.load(Ordering::Relaxed) {
+                return WalkState::Quit;
             }
             let outcome = catch_unwind(AssertUnwindSafe(|| {
                 if panic_probe {
@@ -410,25 +408,17 @@ impl PathFilters {
 
     pub(crate) fn path_allowed(&self, rel: &str) -> bool {
         let path = Path::new(rel);
-        if let Some(excludes) = &self.excludes {
-            if excludes.is_match(path) {
-                return false;
-            }
+        if let Some(excludes) = &self.excludes && excludes.is_match(path) {
+            return false;
         }
-        if let Some(skip_path_re) = &self.skip_path_re {
-            if re_match(skip_path_re, rel) {
-                return false;
-            }
+        if let Some(skip_path_re) = &self.skip_path_re && re_match(skip_path_re, rel) {
+            return false;
         }
-        if let Some(path_re) = &self.path_re {
-            if !re_match(path_re, rel) {
-                return false;
-            }
+        if let Some(path_re) = &self.path_re && !re_match(path_re, rel) {
+            return false;
         }
-        if let Some(exts) = &self.exts {
-            if !exts.is_match(path) {
-                return false;
-            }
+        if let Some(exts) = &self.exts && !exts.is_match(path) {
+            return false;
         }
         if let Some(includes) = &self.includes {
             return includes.is_match(path);
@@ -448,15 +438,11 @@ impl PathFilters {
             return true;
         }
         let rel = rel_path(root, path);
-        if let Some(skip_dirs) = &self.skip_dirs {
-            if skip_dirs.is_match(Path::new(&rel)) {
-                return false;
-            }
+        if let Some(skip_dirs) = &self.skip_dirs && skip_dirs.is_match(Path::new(&rel)) {
+            return false;
         }
-        if let Some(skip_dir_re) = &self.skip_dir_re {
-            if re_match(skip_dir_re, &rel) {
-                return false;
-            }
+        if let Some(skip_dir_re) = &self.skip_dir_re && re_match(skip_dir_re, &rel) {
+            return false;
         }
         true
     }

@@ -1,7 +1,8 @@
 [package]
 name = "rgapi"
 version = "0.1.17"
-edition = "2021"
+edition = "2024"
+rust-version = "1.91"
 license = "MIT OR Apache-2.0"
 description = "Python API for ripgrep-style file walking and searching"
 repository = "https://github.com/AnswerDotAI/rgapi"
