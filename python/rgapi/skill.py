@@ -10,7 +10,7 @@ Core APIs:
 
 Idiomatic usage:
 - Results display through tuned reprs designed to be read as-is: end the cell with the bare call and read what comes back - never join, slice, or otherwise reformat a result by hand. If a result is too big to take in full, narrow it with the function's own parameters (`max_results`, `paths=True`, `count=True`, tighter filters), not by post-processing the output.
-- For orientation in unfamiliar code, start with `rg(pattern, summary=True)` and drop to line-level rows only where needed; add `lnhashs=True` when an edit may follow, so hits arrive with copyable addresses.
+- For orientation, start with `rg(pattern, summary=True)` and drop to line-level rows only where needed; add `lnhashs=True` when an edit may follow, so hits arrive with copyable addresses. This applies beyond unfamiliar code: on prose, config, and markdown, a summary row is the whole matched paragraph, usually exactly the read you wanted.
 - In kernel sessions, reach for `ls()` rather than shell `ls`, and `fd()` rather than shell `find`, for listings you or later calls will read.
 
 SearchLine rows:
