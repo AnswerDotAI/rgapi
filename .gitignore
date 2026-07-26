@@ -11,3 +11,4 @@ __pycache__/
 *.so
 /meta/
 .DS_Store
+meta/
