@@ -5,7 +5,7 @@ from fastcore.meta import delegates
 
 from contextlib import aclosing
 
-from . import _core, _walk_args, _fs_path, _acall, _abatches, _mk_results, _preview, _Results
+from . import _core, _walk_args, _fs_path, _display_path, _acall, _abatches, _mk_results, _preview, _Results
 
 
 
@@ -47,11 +47,11 @@ def search_nb(
     cell_context:int=0,           # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None,# True/False forces case; None allows `smart_case`
     smart_case:bool=False,        # Match `rg --smart-case` behavior
-    display_path:str=None,        # Path stored in results; defaults to `path`
+    display_path:str|Path|None=None, # Path stored in results; defaults to `path`
     maxlen:int=120,                # Maximum source characters per displayed cell
 ) -> NbResults:
     "Search one `.ipynb` file's cell sources, returning matched cells."
-    disp = display_path if display_path is not None else str(path)
+    disp = _display_path(path if display_path is None else display_path)
     rows = _core.nb_search_file(pattern, _fs_path(path), disp, case_sensitive=case_sensitive,
         smart_case=smart_case, cell_context=cell_context)
     res = NbResults(_rows_to_cells(rows, maxlen))

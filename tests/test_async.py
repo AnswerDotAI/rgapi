@@ -33,6 +33,20 @@ def test_async_results_match_sync(tmp_path):
     assert run_sync(rga("TODO", tmp_path, summary=True, timeout_ms=0)).stop_reason == "timeout"
 
 
+def test_async_dot_root(tmp_path, monkeypatch):
+    from rgapi import nbrg, nbrga, nbrga_iter
+    _more(tmp_path)
+    _nb_tree(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert sorted(run_sync(fda(".", ext="py"))) == sorted(fd(".", ext="py"))
+    assert srt(run_sync(rga("TODO", "."))) == srt(rg("TODO", "."))
+    async def rg_rows(): return [r async for r in rga_iter("TODO", ".")]
+    assert srt(run_sync(rg_rows())) == srt(rg("TODO", "."))
+    assert sorted(map(_key, run_sync(nbrga("TODO", ".")))) == sorted(map(_key, nbrg("TODO", ".")))
+    async def nb_rows(): return [c async for c in nbrga_iter("TODO", ".")]
+    assert sorted(map(_key, run_sync(nb_rows()))) == sorted(map(_key, nbrg("TODO", ".")))
+
+
 def test_rga_iter(tmp_path):
     _more(tmp_path)
     async def all_rows(): return [row async for row in rga_iter("TODO", tmp_path)]

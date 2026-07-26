@@ -62,7 +62,9 @@ def test_fd_pattern_is_basename_regex_with_smart_case(tmp_path):
     with pytest.raises(ValueError): fd(tmp_path, pattern=r"(")
 
 def test_pathlike_arguments_and_expanduser(tmp_path, monkeypatch):
+    from rgapi import search_nb
     make_tree(tmp_path)
+    write_nb(tmp_path / "one.ipynb", [_cell("code", ["TODO\n"], cid="c1")])
     assert "src/app.py" in fd(tmp_path)
     assert walk(tmp_path, path_re=r"\.py$") == ["src/app.py"]
     assert [r.path for r in rg("TODO", tmp_path, include="*.py")] == ["src/app.py"]
@@ -72,9 +74,34 @@ def test_pathlike_arguments_and_expanduser(tmp_path, monkeypatch):
     assert search_text(matcher, "TODO\n", path=text_label)[0].path == str(text_label)
     display = tmp_path / "display.py"
     assert search_path(matcher, tmp_path / "src" / "app.py", display_path=display)[0].path == str(display)
+    nb_display = tmp_path / "display.ipynb"
+    assert search_nb("TODO", tmp_path / "one.ipynb", display_path=nb_display)[0].path == str(nb_display)
 
     monkeypatch.setenv("HOME", str(tmp_path))
     assert fd("~", glob="*.py") == ["src/app.py"]
+
+
+def test_relative_root_spellings(tmp_path, monkeypatch):
+    from rgapi import ls, nbrg, nbrg_iter, search_nb
+    make_tree(tmp_path)
+    write_nb(tmp_path / "one.ipynb", [_cell("code", ["read_csv(x)\n"], cid="c1")])
+    monkeypatch.chdir(tmp_path)
+    for root in (".", "./", "src/..", tmp_path):
+        assert fd(root, ext="py") == ["src/app.py"]
+        assert walk(root, path_re=r"\.py$") == ["src/app.py"]
+        assert "src" in ls(root)
+        assert [r.path for r in rg("TODO", root, ext="py")] == ["src/app.py"]
+        assert [r.path for r in rg_iter("TODO", root, ext="py")] == ["src/app.py"]
+        assert [c.cell_id for c in nbrg("read_csv", root)] == ["c1"]
+        assert [c.cell_id for c in nbrg_iter("read_csv", root)] == ["c1"]
+    matcher = compile("TODO")
+    for path in ("src/app.py", "./src/app.py", "src/../src/app.py"):
+        assert search_path(matcher, path)[0].line == "TODO here"
+        assert fd(path) == ["app.py"]
+        assert [r.path for r in rg("TODO", path)] == ["app.py"]
+    for path in ("one.ipynb", "./one.ipynb", "src/../one.ipynb"):
+        assert [c.cell_id for c in search_nb("read_csv", path)] == ["c1"]
+        assert [c.cell_id for c in nbrg("read_csv", path)] == ["c1"]
 
 
 def test_path_filters_prune_dirs_and_follow_links(tmp_path):
