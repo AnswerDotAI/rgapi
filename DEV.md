@@ -28,12 +28,11 @@ All tests are Python (`tests/`), run against the built extension; there are no `
 
 The canonical version lives in `Cargo.toml`. `pyproject.toml` gets the Python package version from Cargo via `dynamic = ["version"]`.
 
-Release flow is: release first, then bump.
+Release flow is: release first, then bump - `ship-release` does both.
 
 1. Run `maturin develop && pytest -q`.
 2. Confirm the release version in `Cargo.toml` (`[package].version`).
-3. Run `ship-rs-release`.
-4. After pushing the release tag, run `ship-rs-bump`, commit the `Cargo.toml` version bump, and push to `main` without a tag.
+3. Run `ship-release`. It tags `v<version>`, pushes branch and tag (CI builds and publishes), then bumps `Cargo.toml`, refreshes the editable install, and pushes the bump without a tag.
 
 The GitHub workflow builds wheels for Python 3.10-3.13 on Linux and macOS and publishes artifacts to GitHub Releases and PyPI when a `v*` tag is pushed.
 
