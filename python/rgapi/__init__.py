@@ -110,7 +110,7 @@ def _context(context, before_context, after_context):
 
 
 def walk(
-    root:str|Path=".", # Directory to walk (expands `~`)
+    root:str|Path=".", # Directory or file to walk (expands `~`)
     hidden:bool=False, # Include hidden files and directories
     ignore:bool=True, # Respect `.gitignore` and other ignore files
     max_depth:int|None=None, # Maximum directory depth to descend
@@ -155,7 +155,7 @@ def _walk_args(
 
 @delegates(_walk_args)
 def fd(
-    root:str|Path=".", # Directory to walk (expands `~`)
+    root:str|Path=".", # Directory or file to walk (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
@@ -169,7 +169,7 @@ def fd(
 
 @delegates(fd)
 def ls(
-    root:str|Path=".", # Directory to list (expands `~`)
+    root:str|Path=".", # Directory or file to list (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
     hidden:bool=False, # Include hidden files and directories, like `ls -a`
     dirs:bool=True, # Include directories in results
@@ -202,7 +202,7 @@ async def _acall(fn, *args):
 
 @delegates(fd)
 async def fda(
-    root:str|Path=".", # Directory to walk (expands `~`)
+    root:str|Path=".", # Directory or file to walk (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
@@ -256,7 +256,7 @@ def _rg_post(rows, paths, count, max_results, timed_out, root):
 @delegates(_walk_args)
 def rg(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory to search (expands `~`)
+    root:str|Path=".", # Directory or file to search (expands `~`)
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     before_context:int=0, # Lines of context before each match, like `rg -B`
@@ -301,7 +301,7 @@ def rg(
 @delegates(_walk_args)
 def rg_iter(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory to search (expands `~`)
+    root:str|Path=".", # Directory or file to search (expands `~`)
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     before_context:int=0, # Lines of context before each match, like `rg -B`
@@ -319,7 +319,7 @@ def rg_iter(
 @delegates(_walk_args)
 async def rga(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory to search (expands `~`)
+    root:str|Path=".", # Directory or file to search (expands `~`)
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     before_context:int=0, # Lines of context before each match, like `rg -B`
@@ -371,7 +371,7 @@ async def _abatches(fn, *args):
 @delegates(_walk_args)
 async def rga_iter(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory to search (expands `~`)
+    root:str|Path=".", # Directory or file to search (expands `~`)
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     before_context:int=0, # Lines of context before each match, like `rg -B`
