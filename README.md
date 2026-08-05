@@ -63,6 +63,8 @@ pip install rgapi
 
 `ls` lists like the shell command: it is `fd` with defaults flipped to one level (`max_depth=1`), directories included, ignore rules off, and results sorted by name. `hidden=True` is `ls -a`, and every `fd` filter still applies.
 
+`fd_iter` is the lazy form of `fd`, yielding `FileEntry` paths as the walk finds them, and takes every `fd` filter. It has no `timeout_ms`, since a consumer that stops asking for paths ends the walk itself.
+
 `path_re` and `skip_path_re` are regex filters on slash-separated relative paths. They filter returned paths or searched files, but do not control traversal. `skip_dir` uses glob syntax to prune matching directory subtrees, and `skip_dir_re` does the same with regex.
 
 `rg` and `rg_iter` return structured rows rather than raw CLI text. They accept the same `include`, `exclude`, `glob`, `ext`, `path_re`, `skip_path_re`, `skip_dir`, `skip_dir_re`, `min_depth`, `max_depth`, `max_filesize`, `follow_links`, and `same_file_system` filters as `fd`. Each row is a `SearchLine` with:
@@ -133,7 +135,7 @@ Notebook walking, parsing, and matching all happen in parallel in Rust, in the s
 
 ## Async
 
-`fda`, `rga`, and `nbrga` are awaitable twins of `fd`, `rg`, and `nbrg`, and `rga_iter` and `nbrga_iter` are async generators that yield rows as the search finds them. All take the same arguments and return the same types as their sync counterparts.
+`fda`, `rga`, and `nbrga` are awaitable twins of `fd`, `rg`, and `nbrg`, and `fda_iter`, `rga_iter` and `nbrga_iter` are async generators that yield rows as the search finds them. All take the same arguments and return the same types as their sync counterparts.
 
 ```python
 from rgapi import fda, rga, rga_iter

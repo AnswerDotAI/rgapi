@@ -3,7 +3,7 @@ import _thread, json, threading
 import pytest
 
 from rgapi import _core
-from rgapi import BlockResults, PathResults, Regex, SearchResults, compile, fd, rg, rg_iter, search_path, search_text, walk
+from rgapi import BlockResults, PathResults, Regex, SearchResults, compile, fd, fd_iter, rg, rg_iter, search_path, search_text, walk
 
 
 def make_tree(tmp_path):
@@ -482,6 +482,11 @@ def test_pathresults_and_stop_reason(tmp_path):
     assert timed.complete and sorted(timed) == sorted(found)
     assert fd(tmp_path, timeout_ms=0).stop_reason == "timeout"
     assert walk(tmp_path, timeout_ms=0).stop_reason == "timeout"
+
+    stream = fd_iter(tmp_path)
+    assert iter(stream) is stream
+    got = sorted(stream)
+    assert got == sorted(found) and got[0].mtime is not None
 
 
 def test_nbrg_stop_reason(tmp_path):

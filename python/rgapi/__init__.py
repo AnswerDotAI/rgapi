@@ -171,6 +171,19 @@ def fd(
     return _mk_results(PathResults, _fe(paths, rt, show_target), False, timed_out)
 
 
+@delegates(_walk_args)
+def fd_iter(
+    root:str|Path=".", # Directory or file to walk (expands `~`)
+    pattern:str|None=None, # Smart-case regex matched against each basename
+    files:bool=True, # Include files in results
+    dirs:bool=False, # Include directories in results
+    **kwargs
+):
+    "Walk lazily, yielding `FileEntry` paths as they are found; early exit stops the walk."
+    rt = _fs_path(root)
+    return _fe(_core.find_iter(rt, pattern, *_walk_args(**kwargs), files, dirs), rt)
+
+
 @delegates(fd)
 def ls(
     root:str|Path=".", # Directory or file to list (expands `~`)
@@ -217,6 +230,23 @@ async def fda(
     rt = _fs_path(root)
     paths, timed_out = await _acall(_core.find_async, rt, pattern, *_walk_args(**kwargs), files, dirs, timeout_ms)
     return _mk_results(PathResults, _fe(paths, rt), False, timed_out)
+
+
+@delegates(_walk_args)
+async def fda_iter(
+    root:str|Path=".", # Directory or file to walk (expands `~`)
+    pattern:str|None=None, # Smart-case regex matched against each basename
+    files:bool=True, # Include files in results
+    dirs:bool=False, # Include directories in results
+    batch_max:int=512, # Largest batch of paths delivered to the event loop at once
+    **kwargs
+):
+    "Async `fd_iter`: yield `FileEntry` paths as they are found; early exit stops the walk."
+    rt = _fs_path(root)
+    async with aclosing(_abatches(_core.find_iter_async, batch_max, rt, pattern,
+        *_walk_args(**kwargs), files, dirs)) as batches:
+        async for paths in batches:
+            for p in _fe(paths, rt): yield p
 
 
 
@@ -424,4 +454,4 @@ def search_path(
 from .block import BlockResults, SearchBlock, _block_post
 from .nb import NbCell, NbResults, nbrg, nbrg_iter, nbrga, nbrga_iter, search_nb
 
-__all__ = [ "RgIter", "fd", "fda", "ls", "rg", "rga", "rg_iter", "rga_iter", "nbrg", "nbrg_iter", "nbrga", "nbrga_iter" ]
+__all__ = [ "RgIter", "fd", "fd_iter", "fda", "fda_iter", "ls", "rg", "rga", "rg_iter", "rga_iter", "nbrg", "nbrg_iter", "nbrga", "nbrga_iter" ]

@@ -13,8 +13,8 @@ use crate::search::spans_for;
 use crate::{
     block_iter as block_iter_core, compile_regex, find, find_iter as find_iter_core,
     nb_iter as nb_iter_core, nb_search_file, rg_iter as rg_iter_core,
-    search_path as search_path_core, search_text as search_text_core, FindOptions, NbCell, NbIter,
-    NbOptions, RgIter, RgOptions, SearchBlock, SearchLine, StreamIter,
+    search_path as search_path_core, search_text as search_text_core, FindIter, FindOptions,
+    NbCell, NbIter, NbOptions, RgIter, RgOptions, SearchBlock, SearchLine, StreamIter,
 };
 use std::path::Path;
 
@@ -644,6 +644,73 @@ fn rg_iter_py(
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+#[pyclass(name = "FindIter", unsendable)]
+struct FindIterPy {
+    inner: FindIter,
+}
+#[pymethods]
+impl FindIterPy {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+    fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Option<String>> {
+        next_stream_py(py, &mut slf.inner)
+    }
+    fn cancel(&self) {
+        self.inner.cancel();
+    }
+    fn __repr__(&self) -> String {
+        "FindIter(path stream)".to_string()
+    }
+}
+
+#[pyfunction(name = "find_iter")]
+#[pyo3(signature = (root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
+fn find_iter_py(
+    root: &str,
+    pattern: Option<String>,
+    include: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
+    hidden: bool,
+    ignore: bool,
+    max_depth: Option<usize>,
+    min_depth: Option<usize>,
+    max_filesize: Option<u64>,
+    follow_links: bool,
+    same_file_system: bool,
+    path_re: Option<String>,
+    skip_path_re: Option<String>,
+    skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>,
+    files: bool,
+    dirs: bool,
+) -> PyResult<FindIterPy> {
+    let opts = find_opts(
+        root,
+        pattern,
+        include,
+        exclude,
+        exts,
+        hidden,
+        ignore,
+        max_depth,
+        min_depth,
+        max_filesize,
+        follow_links,
+        same_file_system,
+        path_re,
+        skip_path_re,
+        skip_dir,
+        skip_dir_re,
+        files,
+        dirs,
+    );
+    find_iter_core(&opts)
+        .map(|inner| FindIterPy { inner })
+        .map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 #[pyclass(name = "AsyncHandle")]
 struct AsyncHandlePy {
     cancel: Arc<AtomicBool>,
@@ -704,6 +771,57 @@ fn find_async_py(
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     Ok(stream_async(cb, iter, deadline, |py, paths, timed_out| {
         Ok((paths, timed_out).into_pyobject(py)?.into_any().unbind())
+    }))
+}
+
+#[pyfunction(name = "find_iter_async")]
+#[pyo3(signature = (cb, batch_max, root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
+#[allow(clippy::too_many_arguments)]
+fn find_iter_async_py(
+    cb: Py<PyAny>,
+    batch_max: usize,
+    root: &str,
+    pattern: Option<String>,
+    include: Option<Vec<String>>,
+    exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>,
+    hidden: bool,
+    ignore: bool,
+    max_depth: Option<usize>,
+    min_depth: Option<usize>,
+    max_filesize: Option<u64>,
+    follow_links: bool,
+    same_file_system: bool,
+    path_re: Option<String>,
+    skip_path_re: Option<String>,
+    skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>,
+    files: bool,
+    dirs: bool,
+) -> PyResult<AsyncHandlePy> {
+    let opts = find_opts(
+        root,
+        pattern,
+        include,
+        exclude,
+        exts,
+        hidden,
+        ignore,
+        max_depth,
+        min_depth,
+        max_filesize,
+        follow_links,
+        same_file_system,
+        path_re,
+        skip_path_re,
+        skip_dir,
+        skip_dir_re,
+        files,
+        dirs,
+    );
+    let iter = find_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(stream_iter_async(cb, iter, batch_max, |py, paths| {
+        Ok(paths.into_pyobject(py)?.into_any().unbind())
     }))
 }
 
@@ -1406,6 +1524,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compile_py, m)?)?;
     m.add_function(wrap_pyfunction!(walk_py, m)?)?;
     m.add_function(wrap_pyfunction!(find_py, m)?)?;
+    m.add_class::<FindIterPy>()?;
+    m.add_function(wrap_pyfunction!(find_iter_py, m)?)?;
     m.add_function(wrap_pyfunction!(rg_py, m)?)?;
     m.add_function(wrap_pyfunction!(block_search_py, m)?)?;
     m.add_function(wrap_pyfunction!(rg_iter_py, m)?)?;
@@ -1420,6 +1540,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(nb_iter_async_py, m)?)?;
     m.add_class::<AsyncHandlePy>()?;
     m.add_function(wrap_pyfunction!(find_async_py, m)?)?;
+    m.add_function(wrap_pyfunction!(find_iter_async_py, m)?)?;
     m.add_function(wrap_pyfunction!(rg_async_py, m)?)?;
     m.add_function(wrap_pyfunction!(block_search_async_py, m)?)?;
     m.add_function(wrap_pyfunction!(rg_iter_async_py, m)?)?;
