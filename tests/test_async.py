@@ -4,7 +4,7 @@ from contextlib import aclosing
 import pytest
 from fastcore.aio import run_sync
 
-from rgapi import FileEntry, PathResults, fd, fda, rg, rga, rga_iter
+from rgapi import FileEntry, PathResults, fd, fda, fda_iter, rg, rga, rga_iter
 from test_rgapi import make_tree
 
 
@@ -20,6 +20,7 @@ def test_async_results_match_sync(tmp_path):
     found = run_sync(fda(tmp_path))
     assert type(found) is PathResults and type(found[0]) is FileEntry and sorted(found) == sorted(fd(tmp_path))
     assert sorted(run_sync(fda(tmp_path, glob="*.py"))) == sorted(fd(tmp_path, glob="*.py"))
+    assert run_sync(fda(tmp_path, timeout_ms=0)).stop_reason == "timeout"
     assert srt(run_sync(rga("TODO", tmp_path))) == srt(rg("TODO", tmp_path))
     assert run_sync(rga("TODO", tmp_path, count=True)) == rg("TODO", tmp_path, count=True)
     assert sorted(run_sync(rga("TODO", tmp_path, paths=True))) == sorted(rg("TODO", tmp_path, paths=True))
@@ -57,6 +58,17 @@ def test_rga_iter(tmp_path):
     assert run_sync(first_then_close()).kind == "match"
     async def bad(): return [r async for r in rga_iter("(bad", tmp_path)]
     with pytest.raises(ValueError): run_sync(bad())
+
+
+def test_fda_iter(tmp_path):
+    _more(tmp_path)
+    async def all_paths(): return [p async for p in fda_iter(tmp_path)]
+    got = sorted(run_sync(all_paths()))
+    assert got == sorted(fd(tmp_path)) and type(got[0]) is FileEntry
+    async def first_then_close():
+        async with aclosing(fda_iter(tmp_path)) as it:
+            async for p in it: return p
+    assert run_sync(first_then_close()) in fd(tmp_path)
 
 
 def test_cancellation_no_hang(tmp_path):

@@ -123,12 +123,14 @@ def walk(
     skip_dir:str|list|None=None, # Directory glob or globs to prune
     skip_dir_re:str|None=None, # Directory regex used to prune traversal
     files:bool=True, # Include files in results
-    dirs:bool=False # Include directories in results
+    dirs:bool=False, # Include directories in results
+    timeout_ms:int|None=None, # Cancel the walk after this long and return partial results
 ) -> PathResults:
     "Walk a directory and return relative file and/or directory paths."
     rt = _fs_path(root)
-    return PathResults(_fe(_core.walk(rt, hidden, ignore, max_depth, min_depth, max_filesize, follow_links,
-        same_file_system, path_re, skip_path_re, _listify(skip_dir), skip_dir_re, files, dirs), rt))
+    paths, timed_out = _core.walk(rt, hidden, ignore, max_depth, min_depth, max_filesize, follow_links,
+        same_file_system, path_re, skip_path_re, _listify(skip_dir), skip_dir_re, files, dirs, timeout_ms)
+    return _mk_results(PathResults, _fe(paths, rt), False, timed_out)
 
 
 def _walk_args(
@@ -160,11 +162,26 @@ def fd(
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
     show_target:bool=False, # Append `-> target` to symlink rows in the display
+    timeout_ms:int|None=None, # Cancel the walk after this long and return partial results
     **kwargs
 ) -> PathResults:
     "Find paths with fd-style filters and gitignore support."
     rt = _fs_path(root)
-    return PathResults(_fe(_core.find(rt, pattern, *_walk_args(**kwargs), files, dirs), rt, show_target))
+    paths, timed_out = _core.find(rt, pattern, *_walk_args(**kwargs), files, dirs, timeout_ms)
+    return _mk_results(PathResults, _fe(paths, rt, show_target), False, timed_out)
+
+
+@delegates(_walk_args)
+def fd_iter(
+    root:str|Path=".", # Directory or file to walk (expands `~`)
+    pattern:str|None=None, # Smart-case regex matched against each basename
+    files:bool=True, # Include files in results
+    dirs:bool=False, # Include directories in results
+    **kwargs
+):
+    "Walk lazily, yielding `FileEntry` paths as they are found; early exit stops the walk."
+    rt = _fs_path(root)
+    return _fe(_core.find_iter(rt, pattern, *_walk_args(**kwargs), files, dirs), rt)
 
 
 @delegates(fd)
@@ -206,11 +223,30 @@ async def fda(
     pattern:str|None=None, # Smart-case regex matched against each basename
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
+    timeout_ms:int|None=None, # Cancel the walk after this long and return partial results
     **kwargs
 ) -> PathResults:
     "Async `fd`: find paths on Rust threads without blocking the event loop."
     rt = _fs_path(root)
-    return PathResults(_fe(await _acall(_core.find_async, rt, pattern, *_walk_args(**kwargs), files, dirs), rt))
+    paths, timed_out = await _acall(_core.find_async, rt, pattern, *_walk_args(**kwargs), files, dirs, timeout_ms)
+    return _mk_results(PathResults, _fe(paths, rt), False, timed_out)
+
+
+@delegates(_walk_args)
+async def fda_iter(
+    root:str|Path=".", # Directory or file to walk (expands `~`)
+    pattern:str|None=None, # Smart-case regex matched against each basename
+    files:bool=True, # Include files in results
+    dirs:bool=False, # Include directories in results
+    batch_max:int=512, # Largest batch of paths delivered to the event loop at once
+    **kwargs
+):
+    "Async `fd_iter`: yield `FileEntry` paths as they are found; early exit stops the walk."
+    rt = _fs_path(root)
+    async with aclosing(_abatches(_core.find_iter_async, batch_max, rt, pattern,
+        *_walk_args(**kwargs), files, dirs)) as batches:
+        async for paths in batches:
+            for p in _fe(paths, rt): yield p
 
 
 
@@ -418,4 +454,4 @@ def search_path(
 from .block import BlockResults, SearchBlock, _block_post
 from .nb import NbCell, NbResults, nbrg, nbrg_iter, nbrga, nbrga_iter, search_nb
 
-__all__ = [ "RgIter", "fd", "fda", "ls", "rg", "rga", "rg_iter", "rga_iter", "nbrg", "nbrg_iter", "nbrga", "nbrga_iter" ]
+__all__ = [ "RgIter", "fd", "fd_iter", "fda", "fda_iter", "ls", "rg", "rga", "rg_iter", "rga_iter", "nbrg", "nbrg_iter", "nbrga", "nbrga_iter" ]

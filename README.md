@@ -63,6 +63,8 @@ pip install rgapi
 
 `ls` lists like the shell command: it is `fd` with defaults flipped to one level (`max_depth=1`), directories included, ignore rules off, and results sorted by name. `hidden=True` is `ls -a`, and every `fd` filter still applies.
 
+`fd_iter` is the lazy form of `fd`, yielding `FileEntry` paths as the walk finds them, and takes every `fd` filter. It has no `timeout_ms`, since a consumer that stops asking for paths ends the walk itself.
+
 `path_re` and `skip_path_re` are regex filters on slash-separated relative paths. They filter returned paths or searched files, but do not control traversal. `skip_dir` uses glob syntax to prune matching directory subtrees, and `skip_dir_re` does the same with regex.
 
 `rg` and `rg_iter` return structured rows rather than raw CLI text. They accept the same `include`, `exclude`, `glob`, `ext`, `path_re`, `skip_path_re`, `skip_dir`, `skip_dir_re`, `min_depth`, `max_depth`, `max_filesize`, `follow_links`, and `same_file_system` filters as `fd`. Each row is a `SearchLine` with:
@@ -80,7 +82,7 @@ matches      list of (start, end) byte offsets for match rows
 
 `SearchLine` has a structured `repr`, an rg-style `str` (the `line` is truncated to 120 chars with a trailing `…` for display; `repr` and `asdict()` keep the full line), and `SearchLine.asdict()` returns row fields as a plain Python dict. Pass `rg(..., lnhashs=True)` or `rg_iter(..., lnhashs=True)` to show `lnhash` addresses instead of line numbers in row display while keeping `line_number` available. `rg(..., paths=True)` returns unique matched paths, and `rg(..., count=True)` returns the total number of match spans. `paths` and `count` cannot both be set.
 
-`fd`, `walk`, `ls`, and `rg(..., paths=True)` return `PathResults`, a list of `FileEntry` rows. A `FileEntry` is a `str` subclass holding the relative path, so all string uses keep working, and it stats itself lazily on first access: `stat` is a cached `os.lstat` result (`None` if the path has vanished), with `size`, `mtime`, and `is_dir` derived from it. A `PathResults` displays as an `ls -l`-style long listing, capped at `rgapi.MAX_REPR` rows with a final `… N more` line, so stats are read only for displayed rows; `str()` is still one plain path per line, and `list(res)` shows plain paths. `rg(..., timeout_ms=200)` stops the search at the deadline and returns whatever was collected by then. Results record how they ended: `stop_reason` is `None` for a complete result, `"max_results"` when truncated by `max_results`, or `"timeout"` when a deadline hit, and `complete` is true when `stop_reason` is `None`. `count=True` returns a plain int, which cannot carry the flag, so it rejects `timeout_ms`.
+`fd`, `walk`, `ls`, and `rg(..., paths=True)` return `PathResults`, a list of `FileEntry` rows. A `FileEntry` is a `str` subclass holding the relative path, so all string uses keep working, and it stats itself lazily on first access: `stat` is a cached `os.lstat` result (`None` if the path has vanished), with `size`, `mtime`, and `is_dir` derived from it. A `PathResults` displays as an `ls -l`-style long listing, capped at `rgapi.MAX_REPR` rows with a final `… N more` line, so stats are read only for displayed rows; `str()` is still one plain path per line, and `list(res)` shows plain paths. `rg(..., timeout_ms=200)` and `fd(..., timeout_ms=200)` stop at the deadline and return whatever was collected by then; `walk`, `ls`, and the async forms take it too. Results record how they ended: `stop_reason` is `None` for a complete result, `"max_results"` when truncated by `max_results`, or `"timeout"` when a deadline hit, and `complete` is true when `stop_reason` is `None`. `count=True` returns a plain int, which cannot carry the flag, so it rejects `timeout_ms`.
 
 `before_context`, `after_context`, and `context` are like `rg -B`, `rg -A`, and `rg -C`. Files containing NUL bytes or invalid UTF-8 are skipped.
 
@@ -133,7 +135,7 @@ Notebook walking, parsing, and matching all happen in parallel in Rust, in the s
 
 ## Async
 
-`fda`, `rga`, and `nbrga` are awaitable twins of `fd`, `rg`, and `nbrg`, and `rga_iter` and `nbrga_iter` are async generators that yield rows as the search finds them. All take the same arguments and return the same types as their sync counterparts.
+`fda`, `rga`, and `nbrga` are awaitable twins of `fd`, `rg`, and `nbrg`, and `fda_iter`, `rga_iter` and `nbrga_iter` are async generators that yield rows as the search finds them. All take the same arguments and return the same types as their sync counterparts.
 
 ```python
 from rgapi import fda, rga, rga_iter
