@@ -60,13 +60,12 @@ impl Default for FindOptions {
 }
 
 pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
-    find_cancelable(opts, None)
+    find_iter(opts)?.collect()
 }
 
-pub fn find_cancelable(
-    opts: &FindOptions,
-    cancel: Option<&Arc<AtomicBool>>,
-) -> Result<Vec<String>, RgApiError> {
+pub type FindIter = StreamIter<String>;
+
+pub fn find_iter(opts: &FindOptions) -> Result<FindIter, RgApiError> {
     let (ignore, hidden) = file_root_flags(&opts.root, opts.ignore, opts.hidden);
     let root = normalize_root(&opts.root)?;
     let filters = Arc::new(PathFilters::new(
@@ -78,9 +77,11 @@ pub fn find_cancelable(
         &opts.skip_dirs,
         opts.skip_dir_re.as_deref(),
     )?);
-    let mut walker = WalkBuilder::new(&root);
-    configure_walker(
-        &mut walker,
+    let pattern = opts.pattern.as_deref().map(build_fd_re).transpose()?;
+    let (files, dirs, panic_probe, max_depth) =
+        (opts.files, opts.dirs, opts.panic_probe, opts.max_depth);
+    Ok(spawn_walk(
+        root,
         ignore,
         hidden,
         opts.max_depth,
@@ -88,65 +89,26 @@ pub fn find_cancelable(
         opts.max_filesize,
         opts.follow_links,
         opts.same_file_system,
-    );
-    filter_dirs(&mut walker, &root, filters.clone());
-    let (tx, rx) = mpsc::channel();
-    let pattern = opts
-        .pattern
-        .as_deref()
-        .map(build_fd_re)
-        .transpose()?
-        .map(Arc::new);
-    let files = opts.files;
-    let dirs = opts.dirs;
-    let panic_probe = opts.panic_probe;
-    let max_depth = opts.max_depth;
-    walker.build_parallel().run(|| {
-        let tx = tx.clone();
-        let root = root.clone();
-        let filters = filters.clone();
-        let pattern = pattern.clone();
-        let cancel = cancel.cloned();
-        Box::new(move |entry| {
-            if let Some(c) = &cancel && c.load(Ordering::Relaxed) {
-                return WalkState::Quit;
+        filters,
+        move |dent, root, filters, tx, cancel| {
+            if panic_probe {
+                panic!("rgapi: deliberate panic for tests (panic_probe)");
             }
-            let outcome = catch_unwind(AssertUnwindSafe(|| {
-                if panic_probe {
-                    panic!("rgapi: deliberate panic for tests (panic_probe)");
-                }
-                find_entry(
-                    entry,
-                    &root,
-                    &filters,
-                    pattern.as_deref(),
-                    files,
-                    dirs,
-                    max_depth,
-                )
-            }))
-            .unwrap_or_else(|_| {
-                Err(RgApiError::new(
-                    "internal error during walk (this is a bug, please report it)",
-                ))
-            });
-            match outcome {
+            match find_entry(dent, root, filters, pattern.as_ref(), files, dirs, max_depth) {
                 Ok(Some(path)) => {
-                    if tx.send(Ok(path)).is_err() {
+                    if cancel.load(Ordering::Relaxed) || tx.send(Ok(path)).is_err() {
                         return WalkState::Quit;
                     }
+                    WalkState::Continue
                 }
-                Ok(None) => {}
+                Ok(None) => WalkState::Continue,
                 Err(err) => {
                     let _ = tx.send(Err(err));
-                    return WalkState::Quit;
+                    WalkState::Quit
                 }
             }
-            WalkState::Continue
-        })
-    });
-    drop(tx);
-    rx.into_iter().collect()
+        },
+    ))
 }
 
 pub struct StreamIter<T> {

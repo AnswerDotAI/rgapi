@@ -13,7 +13,7 @@ pub use search::{
     compile_regex, rg, rg_iter, search_path, search_text, MatchSpan, RgIter, RgOptions, SearchKind,
     SearchLine,
 };
-pub use walk::{find, find_cancelable, FindOptions, StreamIter};
+pub use walk::{find, find_iter, FindIter, FindOptions, StreamIter};
 
 #[derive(Debug, Clone)]
 pub struct RgApiError {

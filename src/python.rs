@@ -11,10 +11,10 @@ use pyo3::types::{PyAny, PyDict};
 
 use crate::search::spans_for;
 use crate::{
-    block_iter as block_iter_core, compile_regex, find, find_cancelable, nb_iter as nb_iter_core,
-    nb_search_file, rg_iter as rg_iter_core, search_path as search_path_core,
-    search_text as search_text_core, FindOptions, NbCell, NbIter, NbOptions, RgIter, RgOptions,
-    SearchBlock, SearchLine, StreamIter,
+    block_iter as block_iter_core, compile_regex, find, find_iter as find_iter_core,
+    nb_iter as nb_iter_core, nb_search_file, rg_iter as rg_iter_core,
+    search_path as search_path_core, search_text as search_text_core, FindOptions, NbCell, NbIter,
+    NbOptions, RgIter, RgOptions, SearchBlock, SearchLine, StreamIter,
 };
 use std::path::Path;
 
@@ -306,7 +306,7 @@ fn find_opts(
 }
 
 #[pyfunction(name = "walk")]
-#[pyo3(signature = (root=".", hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
+#[pyo3(signature = (root=".", hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false, timeout_ms=None))]
 fn walk_py(
     py: Python<'_>,
     root: &str,
@@ -323,7 +323,8 @@ fn walk_py(
     skip_dir_re: Option<String>,
     files: bool,
     dirs: bool,
-) -> PyResult<Vec<String>> {
+    timeout_ms: Option<u64>,
+) -> PyResult<(Vec<String>, bool)> {
     let opts = find_opts(
         root,
         None,
@@ -344,12 +345,12 @@ fn walk_py(
         files,
         dirs,
     );
-    py.detach(|| find(&opts))
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+    let iter = find_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    collect_stream_py(py, iter, |p| p, timeout_ms)
 }
 
 #[pyfunction(name = "find")]
-#[pyo3(signature = (root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
+#[pyo3(signature = (root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false, timeout_ms=None))]
 fn find_py(
     py: Python<'_>,
     root: &str,
@@ -370,7 +371,8 @@ fn find_py(
     skip_dir_re: Option<String>,
     files: bool,
     dirs: bool,
-) -> PyResult<Vec<String>> {
+    timeout_ms: Option<u64>,
+) -> PyResult<(Vec<String>, bool)> {
     let opts = find_opts(
         root,
         pattern,
@@ -391,8 +393,8 @@ fn find_py(
         files,
         dirs,
     );
-    py.detach(|| find(&opts))
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+    let iter = find_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    collect_stream_py(py, iter, |p| p, timeout_ms)
 }
 #[pyfunction(name = "search_text")]
 #[pyo3(signature = (matcher, text, path="<text>", before_context=0, after_context=0))]
@@ -655,7 +657,7 @@ impl AsyncHandlePy {
 }
 
 #[pyfunction(name = "find_async")]
-#[pyo3(signature = (cb, root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
+#[pyo3(signature = (cb, root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false, timeout_ms=None))]
 fn find_async_py(
     cb: Py<PyAny>,
     root: &str,
@@ -676,7 +678,8 @@ fn find_async_py(
     skip_dir_re: Option<String>,
     files: bool,
     dirs: bool,
-) -> AsyncHandlePy {
+    timeout_ms: Option<u64>,
+) -> PyResult<AsyncHandlePy> {
     let opts = find_opts(
         root,
         pattern,
@@ -697,18 +700,11 @@ fn find_async_py(
         files,
         dirs,
     );
-    let cancel = Arc::new(AtomicBool::new(false));
-    let flag = cancel.clone();
-    std::thread::spawn(move || {
-        let res = find_cancelable(&opts, Some(&flag));
-        Python::attach(|py| {
-            let _ = match res {
-                Ok(paths) => cb.call1(py, (paths, None::<String>)),
-                Err(err) => cb.call1(py, (None::<Vec<String>>, err.to_string())),
-            };
-        });
-    });
-    AsyncHandlePy { cancel }
+    let iter = find_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
+    Ok(stream_async(cb, iter, deadline, |py, paths, timed_out| {
+        Ok((paths, timed_out).into_pyobject(py)?.into_any().unbind())
+    }))
 }
 
 fn drain_stream<T>(

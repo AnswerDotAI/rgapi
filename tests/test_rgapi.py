@@ -478,6 +478,11 @@ def test_pathresults_and_stop_reason(tmp_path):
     assert ps.complete and sorted(ps) == sorted(rg("TODO", tmp_path, paths=True))
     with pytest.raises(AssertionError): rg("TODO", tmp_path, count=True, timeout_ms=1)
 
+    timed = fd(tmp_path, timeout_ms=10_000)
+    assert timed.complete and sorted(timed) == sorted(found)
+    assert fd(tmp_path, timeout_ms=0).stop_reason == "timeout"
+    assert walk(tmp_path, timeout_ms=0).stop_reason == "timeout"
+
 
 def test_nbrg_stop_reason(tmp_path):
     from rgapi import NbResults, nbrg

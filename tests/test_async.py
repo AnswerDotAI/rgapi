@@ -20,6 +20,7 @@ def test_async_results_match_sync(tmp_path):
     found = run_sync(fda(tmp_path))
     assert type(found) is PathResults and type(found[0]) is FileEntry and sorted(found) == sorted(fd(tmp_path))
     assert sorted(run_sync(fda(tmp_path, glob="*.py"))) == sorted(fd(tmp_path, glob="*.py"))
+    assert run_sync(fda(tmp_path, timeout_ms=0)).stop_reason == "timeout"
     assert srt(run_sync(rga("TODO", tmp_path))) == srt(rg("TODO", tmp_path))
     assert run_sync(rga("TODO", tmp_path, count=True)) == rg("TODO", tmp_path, count=True)
     assert sorted(run_sync(rga("TODO", tmp_path, paths=True))) == sorted(rg("TODO", tmp_path, paths=True))
