@@ -74,23 +74,11 @@ impl SearchLinePy {
     }
     fn __str__(&self) -> String {
         let sep = if self.kind == "match" { ":" } else { "-" };
+        let prefix = if self.path.is_empty() { String::new() } else { format!("{}{}", self.path, sep) };
         if self.display_lnhash {
-            format!(
-                "{}{}{}{}",
-                self.path,
-                sep,
-                self.lnhash,
-                preview(&self.line, 120)
-            )
+            format!("{}{}{}", prefix, self.lnhash, preview(&self.line, 120))
         } else {
-            format!(
-                "{}{}{}{}{}",
-                self.path,
-                sep,
-                self.line_number,
-                sep,
-                preview(&self.line, 120)
-            )
+            format!("{}{}{}{}", prefix, self.line_number, sep, preview(&self.line, 120))
         }
     }
     fn _repr_pretty_(&self, p: &Bound<'_, PyAny>, cycle: bool) -> PyResult<()> {

@@ -3,7 +3,7 @@ import _thread, json, threading
 import pytest
 
 from rgapi import _core
-from rgapi import BlockResults, PathResults, Regex, SearchResults, compile, fd, fd_iter, rg, rg_iter, search_path, search_text, walk
+from rgapi import BlockResults, PathResults, Regex, SearchResults, compile, fd, fd_iter, rg, rg_iter, rgstr, search_path, search_text, walk
 
 
 def make_tree(tmp_path):
@@ -301,6 +301,15 @@ def test_direct_regex_and_search_apis(tmp_path):
         ("match", "display.py", 2, "TODO here", [(0, 4)])]
     assert path_res[0].asdict() == dict(kind="match", path="display.py", line_number=2,
         lnhash=path_res[0].lnhash, line="TODO here", matches=[(0, 4)])
+
+
+def test_rgstr():
+    res = rgstr("todo", "zero\nTODO here\none\n", smart_case=True, context=1)
+    assert isinstance(res, SearchResults)
+    assert [(r.kind, r.path, r.line_number, r.line) for r in res] == [
+        ("before", "", 1, "zero"), ("match", "", 2, "TODO here"), ("after", "", 3, "one")]
+    assert str(res[1]) == "2:TODO here"
+    assert str(res[0]) == "1-zero"
 
 
 def write_nb(path, cells):

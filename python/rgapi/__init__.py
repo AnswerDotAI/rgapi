@@ -438,6 +438,18 @@ def search_text(
     return SearchResults(_core.search_text(matcher, text, _display_path(path), before_context, after_context))
 
 
+@delegates(search_text, but=['path'])
+def rgstr(
+    pattern:str, # Regex pattern to search for
+    text:str, # Text to search
+    case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
+    smart_case:bool=False, # Match `rg --smart-case` behavior
+    **kwargs
+) -> SearchResults:
+    "Search text already in hand, like `rg` on a string: no path label, no separate `compile`."
+    return search_text(compile(pattern, case_sensitive=case_sensitive, smart_case=smart_case), text, path="", **kwargs)
+
+
 def search_path(
     matcher:Regex, # Compiled `Regex` from `compile()`
     path:str|Path, # File path to search (expands `~`)
@@ -454,4 +466,4 @@ def search_path(
 from .block import BlockResults, SearchBlock, _block_post
 from .nb import NbCell, NbResults, nbrg, nbrg_iter, nbrga, nbrga_iter, search_nb
 
-__all__ = [ "RgIter", "fd", "fd_iter", "fda", "fda_iter", "ls", "rg", "rga", "rg_iter", "rga_iter", "nbrg", "nbrg_iter", "nbrga", "nbrga_iter" ]
+__all__ = [ "RgIter", "fd", "fd_iter", "fda", "fda_iter", "ls", "rg", "rga", "rg_iter", "rga_iter", "rgstr", "nbrg", "nbrg_iter", "nbrga", "nbrga_iter" ]
