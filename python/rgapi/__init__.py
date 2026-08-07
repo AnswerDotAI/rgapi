@@ -273,10 +273,8 @@ def _mk_results(cls, items, capped, timed_out):
     return res
 
 
-def _rg_post(rows, paths, count, max_results, timed_out, root):
-    "Reduce collected rows to the requested `rg`/`rga` result form"
-    if count: return sum(len(r.matches) for r in rows if r.kind == "match")
-    if not paths: return _mk_results(SearchResults, *_cap_rows(rows, max_results), timed_out)
+def _paths_reduce(rows, root, max_results, timed_out=False):
+    "Unique matched paths as `PathResults` from rows with `kind`/`path`, capped at `max_results`"
     seen,res,capped,er = set(),[],False,_entry_root(root)
     for row in rows:
         if row.kind != "match" or row.path in seen: continue
@@ -286,6 +284,12 @@ def _rg_post(rows, paths, count, max_results, timed_out, root):
         seen.add(row.path)
         res.append(FileEntry(row.path, er))
     return _mk_results(PathResults, res, capped, timed_out)
+
+def _rg_post(rows, paths, count, max_results, timed_out, root):
+    "Reduce collected rows to the requested `rg`/`rga` result form"
+    if count: return sum(len(r.matches) for r in rows if r.kind == "match")
+    if not paths: return _mk_results(SearchResults, *_cap_rows(rows, max_results), timed_out)
+    return _paths_reduce(rows, root, max_results, timed_out)
 
 
 
@@ -320,16 +324,7 @@ def rg(
         rows,timed_out = _core.block_search(*args, timeout_ms)
         return _block_post(rows, max_results, before_context, after_context, timed_out, maxlen, lnhashs)
     if count: return sum(len(row.matches) for row in _core.rg_iter(*args) if row.kind == "match")
-    if paths and timeout_ms is None:
-        seen, res, capped, er = set(), [], False, _entry_root(rt)
-        for row in _core.rg_iter(*args):
-            if row.kind != "match" or row.path in seen: continue
-            seen.add(row.path)
-            res.append(FileEntry(row.path, er))
-            if len(res) == max_results:
-                capped = True
-                break
-        return _mk_results(PathResults, res, capped, False)
+    if paths and timeout_ms is None: return _paths_reduce(_core.rg_iter(*args), rt, max_results)
     rows, timed_out = _core.rg(*args, lnhashs, timeout_ms)
     return _rg_post(rows, paths, False, max_results, timed_out, rt)
 

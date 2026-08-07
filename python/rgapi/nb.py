@@ -5,7 +5,7 @@ from fastcore.meta import delegates
 
 from contextlib import aclosing
 
-from . import _core, _walk_args, _fs_path, _display_path, _acall, _abatches, _mk_results, _preview, _Results
+from . import _core, _walk_args, _fs_path, _display_path, _acall, _abatches, _mk_results, _paths_reduce, _preview, _Results
 
 
 
@@ -59,11 +59,12 @@ def search_nb(
     return res
 
 
-def _nb_post(rows, max_results, count, timed_out, maxlen):
+def _nb_post(rows, paths, count, max_results, timed_out, maxlen, root):
     "Reduce collected notebook rows to the requested `nbrg`/`nbrga` result form"
     res = _rows_to_cells(rows, maxlen)
     res.sort(key=lambda c: (c.path, c.cell_index))
     if count: return len(res)
+    if paths: return _paths_reduce(res, root, max_results, timed_out)
     capped = max_results is not None and len(res) > max_results
     return _mk_results(NbResults, res[:max_results] if capped else res, capped, timed_out)
 
@@ -75,18 +76,21 @@ def nbrg(
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
+    paths:bool=False, # Return unique matched paths instead of rows
     max_results:int|None=None, # Return at most this many cells
     count:bool=False, # Return the number of matching cells instead of results
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
     maxlen:int=120, # Maximum source characters per displayed cell
     **kwargs
-) -> NbResults:
-    "Search `.ipynb` cell sources under `root` in parallel, returning matched cells."
+):
+    "Search `.ipynb` cell sources under `root` in parallel, returning matched cells, paths, or a count."
     assert not (count and max_results), "count and max_results are mutually exclusive"
     assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
-    rows, timed_out = _core.nb_search(pattern, _fs_path(root), *_walk_args(ext="ipynb", **kwargs),
+    assert not (paths and count), "paths and count are mutually exclusive"
+    rt = _fs_path(root)
+    rows, timed_out = _core.nb_search(pattern, rt, *_walk_args(ext="ipynb", **kwargs),
         case_sensitive, smart_case, cell_context, timeout_ms)
-    return _nb_post(rows, max_results, count, timed_out, maxlen)
+    return _nb_post(rows, paths, count, max_results, timed_out, maxlen, rt)
 
 
 @delegates(_walk_args, but=["ext"])
@@ -111,18 +115,21 @@ async def nbrga(
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
+    paths:bool=False, # Return unique matched paths instead of rows
     max_results:int|None=None, # Return at most this many cells
     count:bool=False, # Return the number of matching cells instead of results
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
     maxlen:int=120, # Maximum source characters per displayed cell
     **kwargs
-) -> NbResults:
+):
     "Async `nbrg`: search notebooks on Rust threads without blocking the event loop."
     assert not (count and max_results), "count and max_results are mutually exclusive"
     assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
-    rows, timed_out = await _acall(_core.nb_search_async, pattern, _fs_path(root),
+    assert not (paths and count), "paths and count are mutually exclusive"
+    rt = _fs_path(root)
+    rows, timed_out = await _acall(_core.nb_search_async, pattern, rt,
         *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context, timeout_ms)
-    return _nb_post(rows, max_results, count, timed_out, maxlen)
+    return _nb_post(rows, paths, count, max_results, timed_out, maxlen, rt)
 
 
 @delegates(_walk_args, but=["ext"])
