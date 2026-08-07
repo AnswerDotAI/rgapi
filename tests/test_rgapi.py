@@ -606,3 +606,18 @@ def test_symlink_link_target_and_show_target(tmp_path):
     assert ents["lnk"]._line().startswith("l") and ents["lnk"]._line().endswith("-> real")
     default = {str(e): e for e in fd(str(tmp_path), files=True, dirs=True)}
     assert "->" not in default["lnk"]._line()
+
+
+def test_nbrg_multiline(tmp_path):
+    import pytest
+    from rgapi import nbrg
+    write_nb(tmp_path / "nb.ipynb", [
+        _cell("code", ["#| export\n", "import os\n"], cid="c1"),
+        _cell("code", ["import os\n", "#| export\n"], cid="c2"),
+    ])
+    with pytest.raises(ValueError): nbrg(r"export\nimport", str(tmp_path))
+    res = nbrg(r"export\nimport", str(tmp_path), multiline=True)
+    assert [c.cell_id for c in res] == ["c1"]
+    m, = res[0].matches
+    assert m.line_number == 1 and "export" in m.line and "import" in m.line
+    assert nbrg(r"^import", str(tmp_path), multiline=True, count=True) == 2   # ^ still means line start

@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::{
+    Arc,
     atomic::{AtomicBool, Ordering},
     mpsc::SyncSender,
-    Arc,
 };
 
 use grep_matcher::Matcher;
@@ -12,10 +12,10 @@ use grep_searcher::{
 };
 use ignore::{DirEntry, WalkState};
 
-use crate::walk::{
-    entry_err, file_root_flags, normalize_root, rel_path, spawn_walk, PathFilters, StreamIter,
-};
 use crate::RgApiError;
+use crate::walk::{
+    PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchSpan {
@@ -119,7 +119,7 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
         &opts.skip_dirs,
         opts.skip_dir_re.as_deref(),
     )?);
-    let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case)?;
+    let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, false)?;
     let (before_context, after_context, panic_probe, max_depth) = (
         opts.before_context,
         opts.after_context,
@@ -177,7 +177,7 @@ fn search_entry(
             return match entry_err(err, max_depth) {
                 Some(e) => send_search_error(tx, e),
                 None => WalkState::Continue,
-            }
+            };
         }
     };
     let path = dent.path();
@@ -230,12 +230,17 @@ pub fn compile_regex(
     pattern: &str,
     case_sensitive: Option<bool>,
     smart_case: bool,
+    multiline: bool,
 ) -> Result<RegexMatcher, RgApiError> {
     if pattern.is_empty() {
         return Err(RgApiError::new("pattern may not be empty"));
     }
     let mut builder = RegexMatcherBuilder::new();
-    builder.line_terminator(Some(b'\n'));
+    if multiline {
+        builder.multi_line(true);
+    } else {
+        builder.line_terminator(Some(b'\n'));
+    }
     match case_sensitive {
         Some(true) => {
             builder.case_insensitive(false);
@@ -314,6 +319,7 @@ pub fn search_text(
     matcher: RegexMatcher,
     before_context: usize,
     after_context: usize,
+    multiline: bool,
 ) -> Result<Vec<SearchLine>, RgApiError> {
     search_bytes(
         display_path,
@@ -321,6 +327,7 @@ pub fn search_text(
         matcher,
         before_context,
         after_context,
+        multiline,
     )
 }
 fn search_bytes(
@@ -329,12 +336,14 @@ fn search_bytes(
     matcher: RegexMatcher,
     before_context: usize,
     after_context: usize,
+    multiline: bool,
 ) -> Result<Vec<SearchLine>, RgApiError> {
     let mut builder = SearcherBuilder::new();
     builder
         .line_number(true)
         .before_context(before_context)
-        .after_context(after_context);
+        .after_context(after_context)
+        .multi_line(multiline);
     let mut searcher = builder.build();
     let mut out = Vec::new();
     let search_matcher = matcher.clone();

@@ -1,7 +1,7 @@
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use grep_matcher::Matcher;
@@ -94,7 +94,15 @@ pub fn find_iter(opts: &FindOptions) -> Result<FindIter, RgApiError> {
             if panic_probe {
                 panic!("rgapi: deliberate panic for tests (panic_probe)");
             }
-            match find_entry(dent, root, filters, pattern.as_ref(), files, dirs, max_depth) {
+            match find_entry(
+                dent,
+                root,
+                filters,
+                pattern.as_ref(),
+                files,
+                dirs,
+                max_depth,
+            ) {
                 Ok(Some(path)) => {
                     if cancel.load(Ordering::Relaxed) || tx.send(Ok(path)).is_err() {
                         return WalkState::Quit;
@@ -370,16 +378,24 @@ impl PathFilters {
 
     pub(crate) fn path_allowed(&self, rel: &str) -> bool {
         let path = Path::new(rel);
-        if let Some(excludes) = &self.excludes && excludes.is_match(path) {
+        if let Some(excludes) = &self.excludes
+            && excludes.is_match(path)
+        {
             return false;
         }
-        if let Some(skip_path_re) = &self.skip_path_re && re_match(skip_path_re, rel) {
+        if let Some(skip_path_re) = &self.skip_path_re
+            && re_match(skip_path_re, rel)
+        {
             return false;
         }
-        if let Some(path_re) = &self.path_re && !re_match(path_re, rel) {
+        if let Some(path_re) = &self.path_re
+            && !re_match(path_re, rel)
+        {
             return false;
         }
-        if let Some(exts) = &self.exts && !exts.is_match(path) {
+        if let Some(exts) = &self.exts
+            && !exts.is_match(path)
+        {
             return false;
         }
         if let Some(includes) = &self.includes {
@@ -400,10 +416,14 @@ impl PathFilters {
             return true;
         }
         let rel = rel_path(root, path);
-        if let Some(skip_dirs) = &self.skip_dirs && skip_dirs.is_match(Path::new(&rel)) {
+        if let Some(skip_dirs) = &self.skip_dirs
+            && skip_dirs.is_match(Path::new(&rel))
+        {
             return false;
         }
-        if let Some(skip_dir_re) = &self.skip_dir_re && re_match(skip_dir_re, &rel) {
+        if let Some(skip_dir_re) = &self.skip_dir_re
+            && re_match(skip_dir_re, &rel)
+        {
             return false;
         }
         true

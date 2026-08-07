@@ -77,6 +77,7 @@ def nbrg(
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     paths:bool=False, # Return unique matched paths instead of rows
+    multiline:bool=False, # Let the pattern match across lines within a cell
     max_results:int|None=None, # Return at most this many cells
     count:bool=False, # Return the number of matching cells instead of results
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
@@ -89,7 +90,7 @@ def nbrg(
     assert not (paths and count), "paths and count are mutually exclusive"
     rt = _fs_path(root)
     rows, timed_out = _core.nb_search(pattern, rt, *_walk_args(ext="ipynb", **kwargs),
-        case_sensitive, smart_case, cell_context, timeout_ms)
+        case_sensitive, smart_case, cell_context, multiline, timeout_ms)
     return _nb_post(rows, paths, count, max_results, timed_out, maxlen, rt)
 
 
@@ -100,11 +101,12 @@ def nbrg_iter(
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
+    multiline:bool=False, # Let the pattern match across lines within a cell
     maxlen:int=120, # Maximum source characters per displayed cell
     **kwargs
 ):
     "Search `.ipynb` cell sources lazily, yielding `NbCell` rows as they are found."
-    it = _core.nb_iter(pattern, _fs_path(root), *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context)
+    it = _core.nb_iter(pattern, _fs_path(root), *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context, multiline)
     return (_row_to_cell(row, maxlen) for row in it)
 
 
@@ -116,6 +118,7 @@ async def nbrga(
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     paths:bool=False, # Return unique matched paths instead of rows
+    multiline:bool=False, # Let the pattern match across lines within a cell
     max_results:int|None=None, # Return at most this many cells
     count:bool=False, # Return the number of matching cells instead of results
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
@@ -128,7 +131,7 @@ async def nbrga(
     assert not (paths and count), "paths and count are mutually exclusive"
     rt = _fs_path(root)
     rows, timed_out = await _acall(_core.nb_search_async, pattern, rt,
-        *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context, timeout_ms)
+        *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context, multiline, timeout_ms)
     return _nb_post(rows, paths, count, max_results, timed_out, maxlen, rt)
 
 
@@ -139,12 +142,13 @@ async def nbrga_iter(
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
+    multiline:bool=False, # Let the pattern match across lines within a cell
     batch_max:int=512, # Largest batch of cells delivered to the event loop at once
     maxlen:int=120, # Maximum source characters per displayed cell
     **kwargs
 ):
     "Async `nbrg_iter`: yield `NbCell` rows as they are found; early exit cancels the search."
     async with aclosing(_abatches(_core.nb_iter_async, batch_max, pattern, _fs_path(root),
-        *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context)) as batches:
+        *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context, multiline)) as batches:
         async for rows in batches:
             for row in rows: yield _row_to_cell(row, maxlen)

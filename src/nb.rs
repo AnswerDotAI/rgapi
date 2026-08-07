@@ -1,17 +1,17 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use grep_regex::RegexMatcher;
 use ignore::{DirEntry, WalkState};
 use serde::Deserialize;
 
-use crate::search::{compile_regex, search_text, SearchLine};
-use crate::walk::{
-    entry_err, file_root_flags, normalize_root, rel_path, spawn_walk, PathFilters, StreamIter,
-};
 use crate::RgApiError;
+use crate::search::{SearchLine, compile_regex, search_text};
+use crate::walk::{
+    PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk,
+};
 
 #[derive(Debug, Clone)]
 pub struct NbOptions {
@@ -34,6 +34,7 @@ pub struct NbOptions {
     pub case_sensitive: Option<bool>,
     pub smart_case: bool,
     pub cell_context: usize,
+    pub multiline: bool,
 }
 
 /// One emitted cell (a match, or context for a match).
@@ -100,6 +101,7 @@ fn process_file(
     bytes: &[u8],
     matcher: &RegexMatcher,
     cell_context: usize,
+    multiline: bool,
 ) -> Result<Vec<NbCell>, RgApiError> {
     // Not a parseable notebook (bad JSON, or JSON that isn't a notebook): skip, like a binary file.
     let nb: RawNb = match serde_json::from_slice(bytes) {
@@ -111,7 +113,7 @@ fn process_file(
     let mut matched: Vec<(usize, Vec<SearchLine>)> = Vec::new();
     for (i, cell) in nb.cells.iter().enumerate() {
         let src = cell.source.text();
-        let hits = search_text(disp.clone(), &src, matcher.clone(), 0, 0)?;
+        let hits = search_text(disp.clone(), &src, matcher.clone(), 0, 0, multiline)?;
         if !hits.is_empty() {
             matched.push((i, hits));
         }
@@ -164,13 +166,14 @@ pub fn nb_search_file(
     case_sensitive: Option<bool>,
     smart_case: bool,
     cell_context: usize,
+    multiline: bool,
 ) -> Result<Vec<NbCell>, RgApiError> {
-    let matcher = compile_regex(pattern, case_sensitive, smart_case)?;
+    let matcher = compile_regex(pattern, case_sensitive, smart_case, multiline)?;
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(_) => return Ok(Vec::new()),
     };
-    process_file(display_path, &bytes, &matcher, cell_context)
+    process_file(display_path, &bytes, &matcher, cell_context, multiline)
 }
 
 fn nb_entry(
@@ -179,6 +182,7 @@ fn nb_entry(
     filters: &PathFilters,
     matcher: &RegexMatcher,
     cell_context: usize,
+    multiline: bool,
     max_depth: Option<usize>,
 ) -> Result<Vec<NbCell>, RgApiError> {
     let dent = match entry {
@@ -200,7 +204,7 @@ fn nb_entry(
         Ok(b) => b,
         Err(_) => return Ok(Vec::new()),
     };
-    process_file(rel, &bytes, matcher, cell_context)
+    process_file(rel, &bytes, matcher, cell_context, multiline)
 }
 
 pub type NbIter = StreamIter<NbCell>;
@@ -217,8 +221,14 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
         &opts.skip_dirs,
         opts.skip_dir_re.as_deref(),
     )?);
-    let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case)?;
+    let matcher = compile_regex(
+        &opts.pattern,
+        opts.case_sensitive,
+        opts.smart_case,
+        opts.multiline,
+    )?;
     let cell_context = opts.cell_context;
+    let multiline = opts.multiline;
     let max_depth = opts.max_depth;
     Ok(spawn_walk(
         root,
@@ -236,6 +246,7 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
             filters,
             &matcher,
             cell_context,
+            multiline,
             max_depth,
         ) {
             Ok(cells) => {

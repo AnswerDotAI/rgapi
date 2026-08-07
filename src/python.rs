@@ -1,8 +1,8 @@
 use grep_matcher::Matcher;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pyo3::exceptions::PyValueError;
@@ -11,10 +11,10 @@ use pyo3::types::{PyAny, PyDict};
 
 use crate::search::spans_for;
 use crate::{
-    block_iter as block_iter_core, compile_regex, find, find_iter as find_iter_core,
+    FindIter, FindOptions, NbCell, NbIter, NbOptions, RgIter, RgOptions, SearchBlock, SearchLine,
+    StreamIter, block_iter as block_iter_core, compile_regex, find, find_iter as find_iter_core,
     nb_iter as nb_iter_core, nb_search_file, rg_iter as rg_iter_core,
-    search_path as search_path_core, search_text as search_text_core, FindIter, FindOptions,
-    NbCell, NbIter, NbOptions, RgIter, RgOptions, SearchBlock, SearchLine, StreamIter,
+    search_path as search_path_core, search_text as search_text_core,
 };
 use std::path::Path;
 
@@ -74,11 +74,21 @@ impl SearchLinePy {
     }
     fn __str__(&self) -> String {
         let sep = if self.kind == "match" { ":" } else { "-" };
-        let prefix = if self.path.is_empty() { String::new() } else { format!("{}{}", self.path, sep) };
+        let prefix = if self.path.is_empty() {
+            String::new()
+        } else {
+            format!("{}{}", self.path, sep)
+        };
         if self.display_lnhash {
             format!("{}{}{}", prefix, self.lnhash, preview(&self.line, 120))
         } else {
-            format!("{}{}{}{}", prefix, self.line_number, sep, preview(&self.line, 120))
+            format!(
+                "{}{}{}{}",
+                prefix,
+                self.line_number,
+                sep,
+                preview(&self.line, 120)
+            )
         }
     }
     fn _repr_pretty_(&self, p: &Bound<'_, PyAny>, cycle: bool) -> PyResult<()> {
@@ -232,7 +242,7 @@ fn compile_regex_py(
     case_sensitive: Option<bool>,
     smart_case: bool,
 ) -> PyResult<RegexPy> {
-    let matcher = compile_regex(&pattern, case_sensitive, smart_case)
+    let matcher = compile_regex(&pattern, case_sensitive, smart_case, false)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(RegexPy {
         pattern,
@@ -399,6 +409,7 @@ fn search_text_py(
         matcher.matcher.clone(),
         before_context,
         after_context,
+        false,
     )
     .map(|lines| lines.into_iter().map(SearchLinePy::from).collect())
     .map_err(|e| PyValueError::new_err(e.to_string()))
@@ -1207,6 +1218,7 @@ fn nb_opts(
     case_sensitive: Option<bool>,
     smart_case: bool,
     cell_context: usize,
+    multiline: bool,
 ) -> NbOptions {
     NbOptions {
         root: PathBuf::from(root),
@@ -1228,6 +1240,7 @@ fn nb_opts(
         case_sensitive,
         smart_case,
         cell_context,
+        multiline,
     }
 }
 
@@ -1252,7 +1265,7 @@ impl NbIterPy {
 }
 
 #[pyfunction(name = "nb_search")]
-#[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, timeout_ms=None))]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, multiline=false, timeout_ms=None))]
 #[allow(clippy::too_many_arguments)]
 fn nb_search_py(
     py: Python<'_>,
@@ -1275,6 +1288,7 @@ fn nb_search_py(
     case_sensitive: Option<bool>,
     smart_case: bool,
     cell_context: usize,
+    multiline: bool,
     timeout_ms: Option<u64>,
 ) -> PyResult<(Vec<NbRow>, bool)> {
     let opts = nb_opts(
@@ -1297,13 +1311,14 @@ fn nb_search_py(
         case_sensitive,
         smart_case,
         cell_context,
+        multiline,
     );
     let iter = nb_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     collect_stream_py(py, iter, nb_row, timeout_ms)
 }
 
 #[pyfunction(name = "nb_iter")]
-#[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0))]
+#[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, multiline=false))]
 #[allow(clippy::too_many_arguments)]
 fn nb_iter_py(
     pattern: String,
@@ -1325,6 +1340,7 @@ fn nb_iter_py(
     case_sensitive: Option<bool>,
     smart_case: bool,
     cell_context: usize,
+    multiline: bool,
 ) -> PyResult<NbIterPy> {
     let opts = nb_opts(
         pattern,
@@ -1346,6 +1362,7 @@ fn nb_iter_py(
         case_sensitive,
         smart_case,
         cell_context,
+        multiline,
     );
     nb_iter_core(&opts)
         .map(|inner| NbIterPy { inner })
@@ -1353,7 +1370,7 @@ fn nb_iter_py(
 }
 
 #[pyfunction(name = "nb_search_async")]
-#[pyo3(signature = (cb, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, timeout_ms=None))]
+#[pyo3(signature = (cb, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, multiline=false, timeout_ms=None))]
 #[allow(clippy::too_many_arguments)]
 fn nb_search_async_py(
     cb: Py<PyAny>,
@@ -1376,6 +1393,7 @@ fn nb_search_async_py(
     case_sensitive: Option<bool>,
     smart_case: bool,
     cell_context: usize,
+    multiline: bool,
     timeout_ms: Option<u64>,
 ) -> PyResult<AsyncHandlePy> {
     let opts = nb_opts(
@@ -1398,6 +1416,7 @@ fn nb_search_async_py(
         case_sensitive,
         smart_case,
         cell_context,
+        multiline,
     );
     let iter = nb_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
@@ -1408,7 +1427,7 @@ fn nb_search_async_py(
 }
 
 #[pyfunction(name = "nb_iter_async")]
-#[pyo3(signature = (cb, batch_max, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0))]
+#[pyo3(signature = (cb, batch_max, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, multiline=false))]
 #[allow(clippy::too_many_arguments)]
 fn nb_iter_async_py(
     cb: Py<PyAny>,
@@ -1432,6 +1451,7 @@ fn nb_iter_async_py(
     case_sensitive: Option<bool>,
     smart_case: bool,
     cell_context: usize,
+    multiline: bool,
 ) -> PyResult<AsyncHandlePy> {
     let opts = nb_opts(
         pattern,
@@ -1453,6 +1473,7 @@ fn nb_iter_async_py(
         case_sensitive,
         smart_case,
         cell_context,
+        multiline,
     );
     let iter = nb_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(stream_iter_async(cb, iter, batch_max, |py, rows| {
@@ -1462,7 +1483,7 @@ fn nb_iter_async_py(
 }
 
 #[pyfunction(name = "nb_search_file")]
-#[pyo3(signature = (pattern, path, display_path, case_sensitive=None, smart_case=false, cell_context=0))]
+#[pyo3(signature = (pattern, path, display_path, case_sensitive=None, smart_case=false, cell_context=0, multiline=false))]
 fn nb_search_file_py(
     pattern: &str,
     path: &str,
@@ -1470,6 +1491,7 @@ fn nb_search_file_py(
     case_sensitive: Option<bool>,
     smart_case: bool,
     cell_context: usize,
+    multiline: bool,
 ) -> PyResult<Vec<NbRow>> {
     let cells = nb_search_file(
         Path::new(path),
@@ -1478,6 +1500,7 @@ fn nb_search_file_py(
         case_sensitive,
         smart_case,
         cell_context,
+        multiline,
     )
     .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(cells.into_iter().map(nb_row).collect())

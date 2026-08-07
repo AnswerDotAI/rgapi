@@ -7,13 +7,13 @@ mod walk;
 
 mod python;
 
-pub use block::{block_iter, BlockIter, SearchBlock};
-pub use nb::{nb_iter, nb_search, nb_search_file, NbCell, NbIter, NbOptions};
+pub use block::{BlockIter, SearchBlock, block_iter};
+pub use nb::{NbCell, NbIter, NbOptions, nb_iter, nb_search, nb_search_file};
 pub use search::{
-    compile_regex, rg, rg_iter, search_path, search_text, MatchSpan, RgIter, RgOptions, SearchKind,
-    SearchLine,
+    MatchSpan, RgIter, RgOptions, SearchKind, SearchLine, compile_regex, rg, rg_iter, search_path,
+    search_text,
 };
-pub use walk::{find, find_iter, FindIter, FindOptions, StreamIter};
+pub use walk::{FindIter, FindOptions, StreamIter, find, find_iter};
 
 #[derive(Debug, Clone)]
 pub struct RgApiError {

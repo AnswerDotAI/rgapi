@@ -1,16 +1,16 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use grep_regex::RegexMatcher;
 use ignore::{DirEntry, WalkState};
 
-use crate::search::{compile_regex, format_lnhash, search_text, RgOptions, SearchLine};
-use crate::walk::{
-    entry_err, file_root_flags, normalize_root, rel_path, spawn_walk, PathFilters, StreamIter,
-};
 use crate::RgApiError;
+use crate::search::{RgOptions, SearchLine, compile_regex, format_lnhash, search_text};
+use crate::walk::{
+    PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk,
+};
 
 /// One blank-line-delimited block containing a match, or context for one.
 pub struct SearchBlock {
@@ -78,7 +78,7 @@ fn process_file(
         Err(_) => return Ok(Vec::new()),
     };
     let blocks = split_blocks(text);
-    let hits = search_text(disp.clone(), text, matcher.clone(), 0, 0)?;
+    let hits = search_text(disp.clone(), text, matcher.clone(), 0, 0, false)?;
     if hits.is_empty() {
         return Ok(Vec::new());
     }
@@ -165,7 +165,7 @@ pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
         &opts.skip_dirs,
         opts.skip_dir_re.as_deref(),
     )?);
-    let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case)?;
+    let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, false)?;
     let (before_context, after_context, max_depth) =
         (opts.before_context, opts.after_context, opts.max_depth);
     Ok(spawn_walk(
