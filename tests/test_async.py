@@ -71,6 +71,16 @@ def test_fda_iter(tmp_path):
     assert run_sync(first_then_close()) in fd(tmp_path)
 
 
+def test_nbrga_paths(tmp_path):
+    from rgapi import nbrg, nbrga
+    from test_rgapi import _cell, write_nb
+    write_nb(tmp_path / "a.ipynb", [_cell("code", "foo = 1\n")])
+    write_nb(tmp_path / "b.ipynb", [_cell("code", "foo = 2\n")])
+    res = run_sync(nbrga("foo", tmp_path, paths=True))
+    assert type(res) is PathResults
+    assert sorted(res) == sorted(nbrg("foo", tmp_path, paths=True)) == ["a.ipynb", "b.ipynb"]
+
+
 def test_cancellation_no_hang(tmp_path):
     (tmp_path / "big.txt").write_text("match line\n" * 200_000)
     async def go():

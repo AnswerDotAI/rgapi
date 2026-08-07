@@ -510,6 +510,31 @@ def test_nbrg_stop_reason(tmp_path):
     with pytest.raises(AssertionError): nbrg("foo", str(tmp_path), count=True, timeout_ms=1)
 
 
+def test_nbrg_paths(tmp_path):
+    from rgapi import FileEntry, PathResults, nbrg
+    write_nb(tmp_path / "a.ipynb", [_cell("code", "foo = 1\n"), _cell("markdown", "foo again\n")])
+    write_nb(tmp_path / "b.ipynb", [_cell("code", "foo = 2\n")])
+    write_nb(tmp_path / "c.ipynb", [_cell("code", "bar\n")])
+    res = nbrg("foo", str(tmp_path), paths=True)
+    assert type(res) is PathResults and type(res[0]) is FileEntry
+    assert sorted(res) == ["a.ipynb", "b.ipynb"] and res.complete
+    assert sorted(nbrg("foo", str(tmp_path), paths=True, max_results=2)) == ["a.ipynb", "b.ipynb"]
+    assert nbrg("foo", str(tmp_path), paths=True, max_results=2).stop_reason is None
+    capped = nbrg("foo", str(tmp_path), paths=True, max_results=1)
+    assert len(capped) == 1 and capped.stop_reason == "max_results"
+    with pytest.raises(AssertionError): nbrg("foo", str(tmp_path), paths=True, count=True)
+
+
+def test_rg_paths_cap_semantics(tmp_path):
+    (tmp_path / "one.txt").write_text("needle\n")
+    (tmp_path / "two.txt").write_text("needle\n")
+    exact = rg("needle", str(tmp_path), paths=True, max_results=2)
+    assert sorted(exact) == ["one.txt", "two.txt"] and exact.stop_reason is None
+    assert rg("needle", str(tmp_path), paths=True, max_results=1).stop_reason == "max_results"
+    exact_t = rg("needle", str(tmp_path), paths=True, max_results=2, timeout_ms=10_000)
+    assert sorted(exact_t) == ["one.txt", "two.txt"] and exact_t.stop_reason is None
+
+
 def test_fileentry_and_ls(tmp_path):
     import rgapi
     from rgapi import FileEntry, ls
