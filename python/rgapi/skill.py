@@ -43,9 +43,9 @@ Important:
 Traversal is parallel and result order is NOT guaranteed; wrap in `sorted(...)` if you need stable order. `path_re`/`skip_path_re` filter the returned/searched paths but do not prune traversal; use `skip_dir`/`skip_dir_re` to prune whole subtrees for speed. Run `doc(func)` for full parameter docments.
 """
 
-from . import RgIter, fd, ls, nbrg, rg, rg_iter
+from . import RgIter, fd, ls, nbrg, rg, rg_iter, rgstr
 
-__all__ = [ "RgIter", "fd", "ls", "rg", "rg_iter", "nbrg" ]
+__all__ = [ "RgIter", "fd", "ls", "rg", "rg_iter", "nbrg", "rgstr" ]
 
 __pyskill_params__ = {'walk_params': ('glob', 'include', 'exclude', 'hidden', 'min_depth', 'max_filesize',
     'follow_links', 'same_file_system', 'path_re', 'skip_path_re', 'skip_dir', 'skip_dir_re')}
