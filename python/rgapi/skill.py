@@ -37,7 +37,7 @@ NbCell rows (from `nbrg`):
   source       full cell source
   matches      list of SearchLine rows for the matched lines within the cell
   asdict()     returns the cell fields as a plain dict
-Output is keyed by `cell_id` (the nbformat cell/message id), not line number: `path:cell_id:source` for matches and `path:cell_id-source` for context. Newlines are escaped and `maxlen` limits displayed source without changing `source`. `cell_context=N` adds N neighbouring cells. Walking, parsing, and matching run in parallel in Rust; outputs and metadata are skipped.
+Output is keyed by `cell_id` (the nbformat cell/message id), not line number: `path:cell_id:source` for matches and `path:cell_id-source` for context. A match row starts at its first matched line: earlier lines display as `…[Ln]` (`n` the matched line's 1-based number in the cell), except that a leading `#|` directive line is kept, e.g. `#| export…[L4]needle here`. Newlines are escaped and `maxlen` limits displayed source without changing `source`. `cell_context=N` adds N neighbouring cells. Walking, parsing, and matching run in parallel in Rust; outputs and metadata are skipped.
 
 Important:
 Traversal is parallel and result order is NOT guaranteed; wrap in `sorted(...)` if you need stable order. `path_re`/`skip_path_re` filter the returned/searched paths but do not prune traversal; use `skip_dir`/`skip_dir_re` to prune whole subtrees for speed. Run `doc(func)` for full parameter docments.

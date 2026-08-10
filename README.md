@@ -125,7 +125,7 @@ source       full cell source
 matches      list of SearchLine rows for the matched lines within the cell
 ```
 
-`NbCell.asdict()` returns those fields as a plain dict (with `matches` as `SearchLine` dicts). `str()` and pretty display show one newline-escaped line per cell, keyed by `cell_id`: `path:cell_id:source` for matches and `path:cell_id-source` for context. `maxlen` controls the displayed source length and defaults to 120; the full source remains in `source` and `asdict()`. A cell with several matches appears once, with every hit collected in `matches`.
+`NbCell.asdict()` returns those fields as a plain dict (with `matches` as `SearchLine` dicts). `str()` and pretty display show one newline-escaped line per cell, keyed by `cell_id`: `path:cell_id:source` for matches and `path:cell_id-source` for context. A match row starts at its first matched line: earlier lines display as `…[Ln]` (`n` the matched line's 1-based number in the cell), except that a leading `#|` directive line is kept, e.g. `#| export…[L4]needle here`. `maxlen` controls the displayed source length and defaults to 120; the full source remains in `source` and `asdict()`. A cell with several matches appears once, with every hit collected in `matches`.
 
 `cell_context=N` includes the `N` cells before and after each matching cell as `kind="context"` rows (deduplicated per notebook).
 

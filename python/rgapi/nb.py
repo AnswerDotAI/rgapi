@@ -25,7 +25,17 @@ class NbCell:
 
     def __str__(self):
         sep = ":" if self.kind == "match" else "-"
-        return f"{self.path}:{self.cell_id}{sep}{_preview(self.source, self.maxlen)}"
+        return f"{self.path}:{self.cell_id}{sep}{_preview(self._anchored(), self.maxlen)}"
+
+    def _anchored(self):
+        "Source from the first matched line, prefixed `…[Ln]` when lines are elided; a leading `#|` directive line is kept"
+        if not self.matches: return self.source
+        n = self.matches[0].line_number
+        lines = self.source.split("\n")
+        pre = lines[0] if lines[0].startswith("#|") else ""
+        if n <= (2 if pre else 1): return self.source
+        tail = "\n".join(lines[n-1:])
+        return f"{pre}…[L{n}]{tail}"
 
     def _repr_pretty_(self, p, cycle): p.text("..." if cycle else str(self))
 

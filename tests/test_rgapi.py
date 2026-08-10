@@ -434,6 +434,21 @@ def test_nbcell_str_truncates_and_escapes(tmp_path):
     assert str(search_nb("foo", p, display_path="nb.ipynb", maxlen=10)[0]) == "nb.ipynb:c1:x = 'aaaaa…"
 
 
+def test_nbcell_str_anchors_at_first_match(tmp_path):
+    from rgapi import search_nb
+    p = tmp_path / "nb.ipynb"
+    write_nb(p, [
+        _cell("code", ["import os\n", "x = 1\n", "y = 2\n", "needle = 3\n", "z = 4\n"], cid="c1"),
+        _cell("code", ["#| export\n", "a = 1\n", "b = 2\n", "needle here\n"], cid="c2"),
+        _cell("code", ["needle first\n", "rest\n"], cid="c3"),
+        _cell("code", ["#| export\n", "needle second\n"], cid="c4"),
+    ])
+    strs = {c.cell_id: str(c) for c in search_nb("needle", p, display_path="nb.ipynb")}
+    assert strs["c1"] == "nb.ipynb:c1:…[L4]needle = 3\\nz = 4"           # lines before the match elided
+    assert strs["c2"] == "nb.ipynb:c2:#| export…[L4]needle here"        # leading directive line kept
+    assert strs["c3"] == "nb.ipynb:c3:needle first\\nrest"              # match on line 1: unchanged
+    assert strs["c4"] == "nb.ipynb:c4:#| export\\nneedle second"        # nothing elided: no marker
+
 def test_max_results_and_count(tmp_path):
     from rgapi import nbrg
     make_tree(tmp_path)
