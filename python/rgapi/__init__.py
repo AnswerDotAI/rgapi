@@ -33,6 +33,7 @@ class SearchResults(_Results):
     def __str__(self): return "\n".join(map(str, self))
 
 MAX_REPR = 200 # Most rows shown by a `PathResults` repr
+MAXLEN = _core.MAXLEN # Most source characters shown per displayed block, cell, or line (defined in `src/python.rs`)
 
 def _hsize(n):
     "Human-readable size, `ls -lh` style"
@@ -88,7 +89,7 @@ class PathResults(_Results):
         return "\n".join(res)
     def _repr_pretty_(self, p, cycle): p.text("..." if cycle else repr(self))
 
-def _preview(text, maxlen=120):
+def _preview(text, maxlen=MAXLEN):
     text = text.rstrip("\n").replace("\n", "\\n")
     return text if len(text) <= maxlen else text[:maxlen] + "…"
 
@@ -308,7 +309,7 @@ def rg(
     lnhashs:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
     summary:bool=False, # Return one newline-escaped line per blank-line-delimited block?
-    maxlen:int=120, # Maximum source characters per displayed block
+    maxlen:int=MAXLEN, # Maximum source characters per displayed block
     **kwargs
 ):
     "Search files and return `SearchResults`, matched paths, or a count; `lnhashs=True` shows exhash-style addresses."
@@ -362,7 +363,7 @@ async def rga(
     lnhashs:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
     summary:bool=False, # Return one newline-escaped line per blank-line-delimited block?
-    maxlen:int=120, # Maximum source characters per displayed block
+    maxlen:int=MAXLEN, # Maximum source characters per displayed block
     **kwargs
 ):
     "Async `rg`: search on Rust threads without blocking the event loop."

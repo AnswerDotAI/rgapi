@@ -5,13 +5,13 @@ from fastcore.meta import delegates
 
 from contextlib import aclosing
 
-from . import _core, _walk_args, _fs_path, _display_path, _acall, _abatches, _mk_results, _paths_reduce, _preview, _Results
+from . import MAXLEN, _core, _walk_args, _fs_path, _display_path, _acall, _abatches, _mk_results, _paths_reduce, _preview, _Results
 
 
 
 class NbCell:
     "A notebook cell that matched (or provides context for) a search."
-    def __init__(self, path, cell_index, cell_id, cell_type, kind, source, matches, maxlen=120):
+    def __init__(self, path, cell_index, cell_id, cell_type, kind, source, matches, maxlen=MAXLEN):
         self.path,self.cell_index,self.cell_id = path,cell_index,cell_id
         self.cell_type,self.kind,self.source,self.matches,self.maxlen = cell_type,kind,source,matches,maxlen
 
@@ -45,10 +45,10 @@ class NbResults(_Results):
     def __str__(self): return "\n".join(map(str, self))
 
 
-def _row_to_cell(row, maxlen=120):
+def _row_to_cell(row, maxlen=MAXLEN):
     p,ci,cid,ct,kind,src,matches = row
     return NbCell(p, ci, cid, ct, kind, src, list(matches), maxlen)
-def _rows_to_cells(rows, maxlen=120): return [_row_to_cell(row, maxlen) for row in rows]
+def _rows_to_cells(rows, maxlen=MAXLEN): return [_row_to_cell(row, maxlen) for row in rows]
 
 
 def search_nb(
@@ -58,7 +58,7 @@ def search_nb(
     case_sensitive:bool|None=None,# True/False forces case; None allows `smart_case`
     smart_case:bool=False,        # Match `rg --smart-case` behavior
     display_path:str|Path|None=None, # Path stored in results; defaults to `path`
-    maxlen:int=120,                # Maximum source characters per displayed cell
+    maxlen:int=MAXLEN,                # Maximum source characters per displayed cell
 ) -> NbResults:
     "Search one `.ipynb` file's cell sources, returning matched cells."
     disp = _display_path(path if display_path is None else display_path)
@@ -91,7 +91,7 @@ def nbrg(
     max_results:int|None=None, # Return at most this many cells
     count:bool=False, # Return the number of matching cells instead of results
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
-    maxlen:int=120, # Maximum source characters per displayed cell
+    maxlen:int=MAXLEN, # Maximum source characters per displayed cell
     **kwargs
 ):
     "Search `.ipynb` cell sources under `root` in parallel, returning matched cells, paths, or a count."
@@ -112,7 +112,7 @@ def nbrg_iter(
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     multiline:bool=False, # Let the pattern match across lines within a cell
-    maxlen:int=120, # Maximum source characters per displayed cell
+    maxlen:int=MAXLEN, # Maximum source characters per displayed cell
     **kwargs
 ):
     "Search `.ipynb` cell sources lazily, yielding `NbCell` rows as they are found."
@@ -132,7 +132,7 @@ async def nbrga(
     max_results:int|None=None, # Return at most this many cells
     count:bool=False, # Return the number of matching cells instead of results
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
-    maxlen:int=120, # Maximum source characters per displayed cell
+    maxlen:int=MAXLEN, # Maximum source characters per displayed cell
     **kwargs
 ):
     "Async `nbrg`: search notebooks on Rust threads without blocking the event loop."
@@ -154,7 +154,7 @@ async def nbrga_iter(
     smart_case:bool=False, # Match `rg --smart-case` behavior
     multiline:bool=False, # Let the pattern match across lines within a cell
     batch_max:int=512, # Largest batch of cells delivered to the event loop at once
-    maxlen:int=120, # Maximum source characters per displayed cell
+    maxlen:int=MAXLEN, # Maximum source characters per displayed cell
     **kwargs
 ):
     "Async `nbrg_iter`: yield `NbCell` rows as they are found; early exit cancels the search."

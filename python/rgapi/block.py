@@ -1,11 +1,11 @@
 "Block summaries for `rg(summary=True)`."
 
-from . import _Results, _mk_results, _preview
+from . import MAXLEN, _Results, _mk_results, _preview
 
 
 class SearchBlock:
     "A blank-line-delimited source block containing a match, or context for one."
-    def __init__(self, path, block_index, start_line, end_line, start_lnhash, end_lnhash, kind, source, matches, maxlen=120, display_lnhash=False):
+    def __init__(self, path, block_index, start_line, end_line, start_lnhash, end_lnhash, kind, source, matches, maxlen=MAXLEN, display_lnhash=False):
         self.path,self.block_index,self.start_line,self.end_line = path,block_index,start_line,end_line
         self.start_lnhash,self.end_lnhash,self.display_lnhash = start_lnhash,end_lnhash,display_lnhash
         self.kind,self.source,self.matches,self.maxlen = kind,source,matches,maxlen
@@ -33,7 +33,7 @@ class BlockResults(_Results):
     def __str__(self): return "\n".join(map(str, self))
 
 
-def _row_to_block(row, maxlen=120, display_lnhash=False):
+def _row_to_block(row, maxlen=MAXLEN, display_lnhash=False):
     path,bi,start,end,start_hash,end_hash,kind,source,matches = row
     return SearchBlock(path, bi, start, end, start_hash, end_hash, kind, source, list(matches), maxlen, display_lnhash)
 

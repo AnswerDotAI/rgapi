@@ -46,6 +46,8 @@ impl PartialEq for SearchLinePy {
     }
 }
 
+const MAXLEN: usize = 180; // Most characters shown per displayed line
+
 fn preview(text: &str, width: usize) -> String {
     if text.chars().count() <= width {
         return text.to_string();
@@ -80,14 +82,14 @@ impl SearchLinePy {
             format!("{}{}", self.path, sep)
         };
         if self.display_lnhash {
-            format!("{}{}{}", prefix, self.lnhash, preview(&self.line, 120))
+            format!("{}{}{}", prefix, self.lnhash, preview(&self.line, MAXLEN))
         } else {
             format!(
                 "{}{}{}{}",
                 prefix,
                 self.line_number,
                 sep,
-                preview(&self.line, 120)
+                preview(&self.line, MAXLEN)
             )
         }
     }
@@ -1529,6 +1531,7 @@ fn search_line_py(line: SearchLine, display_lnhash: bool) -> SearchLinePy {
 
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("MAXLEN", MAXLEN)?;
     m.add_class::<SearchLinePy>()?;
     m.add_class::<RgIterPy>()?;
     m.add_class::<RegexPy>()?;

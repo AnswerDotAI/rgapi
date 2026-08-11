@@ -2,7 +2,7 @@ import _thread, json, threading
 
 import pytest
 
-from rgapi import _core
+from rgapi import _core, MAXLEN
 from rgapi import BlockResults, PathResults, Regex, SearchResults, compile, fd, fd_iter, rg, rg_iter, rgstr, search_path, search_text, walk
 
 
@@ -206,19 +206,19 @@ def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
     assert str(stream) == repr(stream)
 
 
-def test_rg_str_truncates_long_lines_to_120_chars(tmp_path):
+def test_rg_str_truncates_long_lines(tmp_path):
     long = "x" * 200
     (tmp_path / "a.py").write_text(f"TODO {long}\n")
-    short = "TODO é" + "y" * 130  # multibyte char before the cut point
+    short = "TODO é" + "y" * 200  # multibyte char before the cut point
     (tmp_path / "b.py").write_text(short + "\n")
     res = rg("TODO", str(tmp_path))
     line_a = next(r for r in res if r.path == "a.py")
     assert line_a.line == f"TODO {long}"                       # data stays full
     s = str(line_a)
-    assert s == f"a.py:1:{('TODO ' + long)[:120]}…"       # display truncated + ellipsis
+    assert s == f"a.py:1:{('TODO ' + long)[:MAXLEN]}…"       # display truncated + ellipsis
     assert repr(line_a).endswith(f'line="TODO {long}", matches=[(0, 4)])')
     line_b = next(r for r in res if r.path == "b.py")
-    assert str(line_b) == f"b.py:1:{short[:120]}…"        # char-safe, no panic on é
+    assert str(line_b) == f"b.py:1:{short[:MAXLEN]}…"        # char-safe, no panic on é
 
 
 
