@@ -94,7 +94,7 @@ matches      list of (start, end) byte offsets for match rows
 rg("TODO", ".", summary=True, context=1, maxlen=120)
 ```
 
-The result is `BlockResults`, a list of `SearchBlock` objects. Each block has `path`, `block_index`, `start_line`, `end_line`, `start_lnhash`, `end_lnhash`, `kind`, full `source`, and `matches`. Its display is `path:start-end:source` for matches and `path:start-end-source` for context. With `lnhashs=True`, the numeric range becomes copyable boundary addresses such as `path:4|a3f2|,6|b1c3|:source`. Embedded newlines are shown as `\n`; `maxlen` limits displayed source without changing `source` or `asdict()`.
+The result is `BlockResults`, a list of `SearchBlock` objects. Each block has `path`, `block_index`, `start_line`, `end_line`, `start_lnhash`, `end_lnhash`, `kind`, full `source`, and `matches`. Its display is `path:start-end:source` for matches and `path:start-end-source` for context. With `lnhashs=True`, the numeric range becomes copyable boundary addresses such as `path:4|a3f2|,6|b1c3|:source`. Embedded newline runs are shown as `¶`; `maxlen` limits displayed source without changing `source` or `asdict()`.
 
 In summary mode, `before_context`, `after_context`, and `context` count neighbouring blocks. `max_results` counts matching blocks and retains their block context. `summary=True` cannot be combined with `paths` or `count`; it can be combined with `lnhash` when copyable block boundaries are useful.
 
@@ -125,7 +125,7 @@ source       full cell source
 matches      list of SearchLine rows for the matched lines within the cell
 ```
 
-`NbCell.asdict()` returns those fields as a plain dict (with `matches` as `SearchLine` dicts). `str()` and pretty display show one newline-escaped line per cell, keyed by `cell_id`: `path:cell_id:source` for matches and `path:cell_id-source` for context. A match row starts at its first matched line: earlier lines display as `…[Ln]` (`n` the matched line's 1-based number in the cell), except that a leading `#|` directive line is kept, e.g. `#| export…[L4]needle here`. `maxlen` controls the displayed source length and defaults to 120; the full source remains in `source` and `asdict()`. A cell with several matches appears once, with every hit collected in `matches`.
+`NbCell.asdict()` returns those fields as a plain dict (with `matches` as `SearchLine` dicts). `str()` and pretty display show one line per cell, newline runs shown as `¶`, keyed by `cell_id`: `path:cell_id:source` for matches and `path:cell_id-source` for context. A match row starts at its first matched line: earlier lines display as `…[Ln]` (`n` the matched line's 1-based number in the cell), except that a leading `#|` directive line is kept, e.g. `#| export…[L4]needle here`. `maxlen` controls the displayed source length and defaults to 120; the full source remains in `source` and `asdict()`. A cell with several matches appears once, with every hit collected in `matches`.
 
 `cell_context=N` includes the `N` cells before and after each matching cell as `kind="context"` rows (deduplicated per notebook).
 

@@ -232,14 +232,14 @@ def test_rg_summary_groups_blocks_with_block_context(tmp_path):
     block = res[1]
     assert block.source == "TODO first\nline\nTODO again"
     assert [m.line_number for m in block.matches] == [4,6]
-    assert str(block) == r"a.py:4-6:TODO first\nline\nTO…"
-    assert str(res).splitlines()[0] == r"a.py:1-2-intro one\nintro two"
+    assert str(block) == r"a.py:4-6:TODO first¶line¶TODO…"
+    assert str(res).splitlines()[0] == r"a.py:1-2-intro one¶intro two"
     assert res[0].asdict()["source"] == "intro one\nintro two"
     with pytest.raises(AssertionError): rg("TODO", tmp_path, summary=True, count=True)
     with pytest.raises(AssertionError): rg("TODO", tmp_path, summary=True, paths=True)
     hashed = rg("TODO", tmp_path, summary=True, lnhashs=True, maxlen=20)
     hblock = hashed[0]
-    assert str(hblock) == f"a.py:{hblock.start_lnhash},{hblock.end_lnhash}:TODO first\\nline\\nTO…"
+    assert str(hblock) == f"a.py:{hblock.start_lnhash},{hblock.end_lnhash}:TODO first¶line¶TODO…"
     assert hblock.asdict()["start_lnhash"] == hblock.start_lnhash
 
     (tmp_path/"a.py").write_text("before\n\nTODO one\n\nbetween\n\nTODO two\n\nafter\n")
@@ -417,7 +417,7 @@ def test_search_nb_single_and_asdict_str(tmp_path):
     res = search_nb("foo", p, display_path="nb.ipynb")
     assert len(res) == 1
     cell = res[0]
-    assert str(cell) == "nb.ipynb:c1:def foo():\\n    return 1"   # cell-oriented: whole cell, newlines escaped
+    assert str(cell) == "nb.ipynb:c1:def foo():¶    return 1"   # cell-oriented: whole cell, newlines joined
     d = cell.asdict()
     assert d["cell_id"] == "c1" and d["cell_type"] == "code" and d["kind"] == "match"
     assert d["matches"][0]["line"] == "def foo():"
@@ -428,7 +428,7 @@ def test_nbcell_str_truncates_and_escapes(tmp_path):
     p = tmp_path / "nb.ipynb"
     write_nb(p, [_cell("code", ["x = '" + "a" * 500 + "'  # foo\n"], cid="c1")])
     s = str(search_nb("foo", p, display_path="nb.ipynb")[0])
-    assert "\n" not in s            # newlines escaped to a single display line
+    assert "\n" not in s            # newlines joined to a single display line
     assert s.endswith("…")          # long cell is truncated
     assert s.startswith("nb.ipynb:c1:")
     assert str(search_nb("foo", p, display_path="nb.ipynb", maxlen=10)[0]) == "nb.ipynb:c1:x = 'aaaaa…"
@@ -444,10 +444,10 @@ def test_nbcell_str_anchors_at_first_match(tmp_path):
         _cell("code", ["#| export\n", "needle second\n"], cid="c4"),
     ])
     strs = {c.cell_id: str(c) for c in search_nb("needle", p, display_path="nb.ipynb")}
-    assert strs["c1"] == "nb.ipynb:c1:…[L4]needle = 3\\nz = 4"           # lines before the match elided
+    assert strs["c1"] == "nb.ipynb:c1:…[L4]needle = 3¶z = 4"           # lines before the match elided
     assert strs["c2"] == "nb.ipynb:c2:#| export…[L4]needle here"        # leading directive line kept
-    assert strs["c3"] == "nb.ipynb:c3:needle first\\nrest"              # match on line 1: unchanged
-    assert strs["c4"] == "nb.ipynb:c4:#| export\\nneedle second"        # nothing elided: no marker
+    assert strs["c3"] == "nb.ipynb:c3:needle first¶rest"              # match on line 1: unchanged
+    assert strs["c4"] == "nb.ipynb:c4:#| export¶needle second"        # nothing elided: no marker
 
 def test_max_results_and_count(tmp_path):
     from rgapi import nbrg

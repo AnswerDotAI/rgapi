@@ -1,4 +1,4 @@
-import asyncio, os
+import asyncio, os, re
 from contextlib import aclosing
 from datetime import datetime
 from functools import cached_property
@@ -90,7 +90,7 @@ class PathResults(_Results):
     def _repr_pretty_(self, p, cycle): p.text("..." if cycle else repr(self))
 
 def _preview(text, maxlen=MAXLEN):
-    text = text.rstrip("\n").replace("\n", "\\n")
+    text = re.sub(r"\n(?:\s*\n)*", "¶", text.rstrip("\n"))
     return text if len(text) <= maxlen else text[:maxlen] + "…"
 
 
@@ -308,7 +308,7 @@ def rg(
     max_results:int|None=None, # Stop after this many matching rows; context rows of kept matches are included
     lnhashs:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
-    summary:bool=False, # Return one newline-escaped line per blank-line-delimited block?
+    summary:bool=False, # Return one pilcrow-joined line per blank-line-delimited block?
     maxlen:int=MAXLEN, # Maximum source characters per displayed block
     **kwargs
 ):
@@ -362,7 +362,7 @@ async def rga(
     max_results:int|None=None, # Stop after this many matching rows; context rows of kept matches are included
     lnhashs:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
-    summary:bool=False, # Return one newline-escaped line per blank-line-delimited block?
+    summary:bool=False, # Return one pilcrow-joined line per blank-line-delimited block?
     maxlen:int=MAXLEN, # Maximum source characters per displayed block
     **kwargs
 ):
