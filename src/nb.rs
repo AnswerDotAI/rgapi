@@ -159,6 +159,23 @@ fn process_file(
     Ok(out)
 }
 
+fn compile_nb_regex(
+    pattern: &str,
+    case_sensitive: Option<bool>,
+    smart_case: bool,
+    multiline: bool,
+) -> Result<RegexMatcher, RgApiError> {
+    compile_regex(pattern, case_sensitive, smart_case, multiline).map_err(|e| {
+        if !multiline && e.to_string().contains("not allowed in a regex") {
+            RgApiError::new(format!(
+                "{e}; pass multiline=True to let the pattern match across lines within a cell"
+            ))
+        } else {
+            e
+        }
+    })
+}
+
 pub fn nb_search_file(
     path: &Path,
     display_path: String,
@@ -168,7 +185,7 @@ pub fn nb_search_file(
     cell_context: usize,
     multiline: bool,
 ) -> Result<Vec<NbCell>, RgApiError> {
-    let matcher = compile_regex(pattern, case_sensitive, smart_case, multiline)?;
+    let matcher = compile_nb_regex(pattern, case_sensitive, smart_case, multiline)?;
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(_) => return Ok(Vec::new()),
@@ -221,7 +238,7 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
         &opts.skip_dirs,
         opts.skip_dir_re.as_deref(),
     )?);
-    let matcher = compile_regex(
+    let matcher = compile_nb_regex(
         &opts.pattern,
         opts.case_sensitive,
         opts.smart_case,

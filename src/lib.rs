@@ -5,6 +5,7 @@ mod nb;
 mod search;
 mod walk;
 
+#[cfg(feature = "python")]
 mod python;
 
 pub use block::{BlockIter, SearchBlock, block_iter};
