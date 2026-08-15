@@ -22,7 +22,7 @@ maturin develop
 pytest -q
 ```
 
-All tests are Python (`tests/`), run against the built extension; there are no `cargo test` unit tests. For a fast local loop use `maturin develop && pytest -q`. Run `cargo fmt --check` and `cargo check --all-features` for Rust-only edits. Run `chkstyle` after Python edits once tests pass.
+Python tests (`tests/`) run against the built extension. `cargo test` covers the Rust-only API, and takes no feature flags: `extension-module` stops pyo3 linking libpython, which a test binary needs. For a fast local loop use `maturin develop && pytest -q`. Run `cargo fmt --check` and `cargo check --all-features` for Rust-only edits. Run `chkstyle` after Python edits once tests pass.
 
 ## Release
 

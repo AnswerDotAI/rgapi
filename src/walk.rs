@@ -140,6 +140,30 @@ impl<T> StreamIter<T> {
     ) -> Result<Result<T, RgApiError>, mpsc::RecvTimeoutError> {
         self.rx.recv_timeout(timeout)
     }
+
+    /// Collect all items, stopping at `timeout_ms`; the bool is true when the deadline stopped it.
+    pub fn collect_timeout(
+        mut self,
+        timeout_ms: Option<u64>,
+    ) -> Result<(Vec<T>, bool), RgApiError> {
+        let Some(ms) = timeout_ms else {
+            return Ok((self.collect::<Result<Vec<_>, _>>()?, false));
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+        let mut res = Vec::new();
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return Ok((res, true));
+            }
+            match self.next_timeout(left) {
+                Ok(Ok(item)) => res.push(item),
+                Ok(Err(err)) => return Err(err),
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Ok((res, false)),
+                Err(mpsc::RecvTimeoutError::Timeout) => return Ok((res, true)),
+            }
+        }
+    }
 }
 
 impl<T> Iterator for StreamIter<T> {
@@ -473,4 +497,50 @@ fn build_path_re(pattern: Option<&str>) -> Result<Option<RegexMatcher>, RgApiErr
 
 fn re_match(matcher: &RegexMatcher, rel: &str) -> bool {
     matcher.is_match(rel.as_bytes()).unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn iter_of(items: Vec<u32>, delay_ms: u64) -> StreamIter<u32> {
+        let (tx, rx) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker = std::thread::spawn(move || {
+            for i in items {
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                if tx.send(Ok(i)).is_err() {
+                    return;
+                }
+            }
+        });
+        StreamIter {
+            rx,
+            cancel,
+            _worker: worker,
+        }
+    }
+
+    #[test]
+    fn collect_timeout_honors_deadline() {
+        let (got, timed_out) = iter_of(vec![1, 2, 3], 0).collect_timeout(None).unwrap();
+        assert_eq!(got, vec![1, 2, 3]);
+        assert!(!timed_out);
+
+        let (got, timed_out) = iter_of(vec![1, 2, 3], 0)
+            .collect_timeout(Some(60_000))
+            .unwrap();
+        assert_eq!(got, vec![1, 2, 3]);
+        assert!(!timed_out);
+
+        let (got, timed_out) = iter_of(vec![1, 2, 3], 50).collect_timeout(Some(0)).unwrap();
+        assert!(got.is_empty());
+        assert!(timed_out);
+
+        let (got, timed_out) = iter_of(vec![1, 2, 3], 200)
+            .collect_timeout(Some(20))
+            .unwrap();
+        assert!(got.is_empty());
+        assert!(timed_out);
+    }
 }
