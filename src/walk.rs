@@ -166,8 +166,16 @@ impl<T> Drop for StreamIter<T> {
 
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_walk<T, F>(
-    root: PathBuf, ignore: bool, hidden: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>,
-    follow_links: bool, same_file_system: bool, filters: Arc<PathFilters>, entry: F,
+    root: PathBuf,
+    ignore: bool,
+    hidden: bool,
+    max_depth: Option<usize>,
+    min_depth: Option<usize>,
+    max_filesize: Option<u64>,
+    follow_links: bool,
+    same_file_system: bool,
+    filters: Arc<PathFilters>,
+    entry: F,
 ) -> StreamIter<T>
 where
     T: Send + 'static,
@@ -205,7 +213,12 @@ where
 }
 
 fn find_entry(
-    entry: Result<DirEntry, ignore::Error>, root: &Path, filters: &PathFilters, pattern: Option<&RegexMatcher>, files: bool, dirs: bool,
+    entry: Result<DirEntry, ignore::Error>,
+    root: &Path,
+    filters: &PathFilters,
+    pattern: Option<&RegexMatcher>,
+    files: bool,
+    dirs: bool,
     max_depth: Option<usize>,
 ) -> Result<Option<String>, RgApiError> {
     let dent = match entry {
@@ -271,8 +284,14 @@ pub(crate) fn rel_path(root: &Path, path: &Path) -> String {
 }
 
 pub(crate) fn configure_walker(
-    walker: &mut WalkBuilder, ignore: bool, hidden: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>,
-    follow_links: bool, same_file_system: bool,
+    walker: &mut WalkBuilder,
+    ignore: bool,
+    hidden: bool,
+    max_depth: Option<usize>,
+    min_depth: Option<usize>,
+    max_filesize: Option<u64>,
+    follow_links: bool,
+    same_file_system: bool,
 ) {
     walker.standard_filters(ignore);
     if ignore {
@@ -304,7 +323,12 @@ pub(crate) struct PathFilters {
 
 impl PathFilters {
     pub(crate) fn new(
-        includes: &[String], excludes: &[String], exts: &[String], path_re: Option<&str>, skip_path_re: Option<&str>, skip_dirs: &[String],
+        includes: &[String],
+        excludes: &[String],
+        exts: &[String],
+        path_re: Option<&str>,
+        skip_path_re: Option<&str>,
+        skip_dirs: &[String],
         skip_dir_re: Option<&str>,
     ) -> Result<Self, RgApiError> {
         Ok(Self {

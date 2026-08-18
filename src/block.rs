@@ -53,9 +53,7 @@ fn split_blocks(text: &str) -> Vec<BlockInfo> {
     blocks
 }
 
-fn process_file(
-    disp: String, bytes: &[u8], matcher: &RegexMatcher, before_context: usize, after_context: usize,
-) -> Result<Vec<SearchBlock>, RgApiError> {
+fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, before_context: usize, after_context: usize) -> Result<Vec<SearchBlock>, RgApiError> {
     if bytes.contains(&0) {
         return Ok(Vec::new());
     }
@@ -103,8 +101,13 @@ fn process_file(
 }
 
 fn block_entry(
-    entry: Result<DirEntry, ignore::Error>, root: &Path, filters: &PathFilters, matcher: &RegexMatcher, before_context: usize,
-    after_context: usize, max_depth: Option<usize>,
+    entry: Result<DirEntry, ignore::Error>,
+    root: &Path,
+    filters: &PathFilters,
+    matcher: &RegexMatcher,
+    before_context: usize,
+    after_context: usize,
+    max_depth: Option<usize>,
 ) -> Result<Vec<SearchBlock>, RgApiError> {
     let dent = match entry {
         Ok(dent) => dent,

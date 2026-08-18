@@ -116,8 +116,7 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
         opts.skip_dir_re.as_deref(),
     )?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, false)?;
-    let (before_context, after_context, panic_probe, max_depth) =
-        (opts.before_context, opts.after_context, opts.panic_probe, opts.max_depth);
+    let (before_context, after_context, panic_probe, max_depth) = (opts.before_context, opts.after_context, opts.panic_probe, opts.max_depth);
     Ok(spawn_walk(
         root,
         ignore,
@@ -140,8 +139,15 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
 pub type RgIter = StreamIter<SearchLine>;
 
 fn search_entry(
-    entry: Result<DirEntry, ignore::Error>, root: &Path, filters: &PathFilters, matcher: &RegexMatcher, before_context: usize,
-    after_context: usize, max_depth: Option<usize>, tx: &SyncSender<Result<SearchLine, RgApiError>>, cancel: &Arc<AtomicBool>,
+    entry: Result<DirEntry, ignore::Error>,
+    root: &Path,
+    filters: &PathFilters,
+    matcher: &RegexMatcher,
+    before_context: usize,
+    after_context: usize,
+    max_depth: Option<usize>,
+    tx: &SyncSender<Result<SearchLine, RgApiError>>,
+    cancel: &Arc<AtomicBool>,
 ) -> WalkState {
     if is_cancelled(cancel) {
         return WalkState::Quit;
@@ -226,13 +232,22 @@ pub(crate) fn format_lnhash(lineno: u64, line: &str) -> String {
 }
 
 pub fn search_path(
-    path: &Path, display_path: String, matcher: RegexMatcher, before_context: usize, after_context: usize,
+    path: &Path,
+    display_path: String,
+    matcher: RegexMatcher,
+    before_context: usize,
+    after_context: usize,
 ) -> Result<Vec<SearchLine>, RgApiError> {
     search_path_cancelable(path, display_path, matcher, before_context, after_context, None)
 }
 
 fn search_path_cancelable(
-    path: &Path, display_path: String, matcher: RegexMatcher, before_context: usize, after_context: usize, cancel: Option<Arc<AtomicBool>>,
+    path: &Path,
+    display_path: String,
+    matcher: RegexMatcher,
+    before_context: usize,
+    after_context: usize,
+    cancel: Option<Arc<AtomicBool>>,
 ) -> Result<Vec<SearchLine>, RgApiError> {
     let mut builder = SearcherBuilder::new();
     builder.line_number(true).before_context(before_context).after_context(after_context).binary_detection(BinaryDetection::quit(0));
@@ -247,12 +262,22 @@ fn search_path_cancelable(
     }
 }
 pub fn search_text(
-    display_path: String, text: &str, matcher: RegexMatcher, before_context: usize, after_context: usize, multiline: bool,
+    display_path: String,
+    text: &str,
+    matcher: RegexMatcher,
+    before_context: usize,
+    after_context: usize,
+    multiline: bool,
 ) -> Result<Vec<SearchLine>, RgApiError> {
     search_bytes(display_path, text.as_bytes(), matcher, before_context, after_context, multiline)
 }
 fn search_bytes(
-    display_path: String, bytes: &[u8], matcher: RegexMatcher, before_context: usize, after_context: usize, multiline: bool,
+    display_path: String,
+    bytes: &[u8],
+    matcher: RegexMatcher,
+    before_context: usize,
+    after_context: usize,
+    multiline: bool,
 ) -> Result<Vec<SearchLine>, RgApiError> {
     let mut builder = SearcherBuilder::new();
     builder.line_number(true).before_context(before_context).after_context(after_context).multi_line(multiline);
@@ -311,14 +336,7 @@ impl Sink for CollectSink<'_> {
         };
         let line = bytes_to_line(ctx.bytes())?;
         let line_number = ctx.line_number().unwrap_or(0);
-        self.lines.push(SearchLine {
-            kind,
-            path: self.path.clone(),
-            line_number,
-            lnhash: format_lnhash(line_number, &line),
-            line,
-            matches: Vec::new(),
-        });
+        self.lines.push(SearchLine { kind, path: self.path.clone(), line_number, lnhash: format_lnhash(line_number, &line), line, matches: Vec::new() });
         Ok(!self.cancelled())
     }
     fn binary_data(&mut self, _searcher: &grep_searcher::Searcher, _binary_byte_offset: u64) -> Result<bool, Self::Error> {

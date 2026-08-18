@@ -94,9 +94,7 @@ impl Source {
     }
 }
 
-fn process_file(
-    disp: String, bytes: &[u8], matcher: &RegexMatcher, cell_context: usize, multiline: bool,
-) -> Result<Vec<NbCell>, RgApiError> {
+fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, cell_context: usize, multiline: bool) -> Result<Vec<NbCell>, RgApiError> {
     // Not a parseable notebook (bad JSON, or JSON that isn't a notebook): skip, like a binary file.
     let nb: RawNb = match serde_json::from_slice(bytes) {
         Ok(nb) => nb,
@@ -132,15 +130,7 @@ fn process_file(
     for (i, is_match) in emit {
         let (cid, ctype, src) = &info[i];
         let (kind, matches) = if is_match { ("match", matched.remove(&i).unwrap_or_default()) } else { ("context", Vec::new()) };
-        out.push(NbCell {
-            path: disp.clone(),
-            cell_index: i,
-            cell_id: cid.clone(),
-            cell_type: ctype.clone(),
-            kind,
-            source: src.clone(),
-            matches,
-        });
+        out.push(NbCell { path: disp.clone(), cell_index: i, cell_id: cid.clone(), cell_type: ctype.clone(), kind, source: src.clone(), matches });
     }
     Ok(out)
 }
@@ -156,7 +146,13 @@ fn compile_nb_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: boo
 }
 
 pub fn nb_search_file(
-    path: &Path, display_path: String, pattern: &str, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool,
+    path: &Path,
+    display_path: String,
+    pattern: &str,
+    case_sensitive: Option<bool>,
+    smart_case: bool,
+    cell_context: usize,
+    multiline: bool,
 ) -> Result<Vec<NbCell>, RgApiError> {
     let matcher = compile_nb_regex(pattern, case_sensitive, smart_case, multiline)?;
     let bytes = match std::fs::read(path) {
@@ -167,8 +163,13 @@ pub fn nb_search_file(
 }
 
 fn nb_entry(
-    entry: Result<DirEntry, ignore::Error>, root: &Path, filters: &PathFilters, matcher: &RegexMatcher, cell_context: usize,
-    multiline: bool, max_depth: Option<usize>,
+    entry: Result<DirEntry, ignore::Error>,
+    root: &Path,
+    filters: &PathFilters,
+    matcher: &RegexMatcher,
+    cell_context: usize,
+    multiline: bool,
+    max_depth: Option<usize>,
 ) -> Result<Vec<NbCell>, RgApiError> {
     let dent = match entry {
         Ok(dent) => dent,
