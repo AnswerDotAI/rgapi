@@ -7,15 +7,11 @@ use std::sync::{
 
 use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
-use grep_searcher::{
-    BinaryDetection, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkError, SinkMatch,
-};
+use grep_searcher::{BinaryDetection, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkError, SinkMatch};
 use ignore::{DirEntry, WalkState};
 
 use crate::RgApiError;
-use crate::walk::{
-    PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk,
-};
+use crate::walk::{PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchSpan {
@@ -120,12 +116,8 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
         opts.skip_dir_re.as_deref(),
     )?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, false)?;
-    let (before_context, after_context, panic_probe, max_depth) = (
-        opts.before_context,
-        opts.after_context,
-        opts.panic_probe,
-        opts.max_depth,
-    );
+    let (before_context, after_context, panic_probe, max_depth) =
+        (opts.before_context, opts.after_context, opts.panic_probe, opts.max_depth);
     Ok(spawn_walk(
         root,
         ignore,
@@ -140,17 +132,7 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
             if panic_probe {
                 panic!("rgapi: deliberate panic for tests (panic_probe)");
             }
-            search_entry(
-                dent,
-                root,
-                filters,
-                &matcher,
-                before_context,
-                after_context,
-                max_depth,
-                tx,
-                cancel,
-            )
+            search_entry(dent, root, filters, &matcher, before_context, after_context, max_depth, tx, cancel)
         },
     ))
 }
@@ -158,15 +140,8 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
 pub type RgIter = StreamIter<SearchLine>;
 
 fn search_entry(
-    entry: Result<DirEntry, ignore::Error>,
-    root: &Path,
-    filters: &PathFilters,
-    matcher: &RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-    max_depth: Option<usize>,
-    tx: &SyncSender<Result<SearchLine, RgApiError>>,
-    cancel: &Arc<AtomicBool>,
+    entry: Result<DirEntry, ignore::Error>, root: &Path, filters: &PathFilters, matcher: &RegexMatcher, before_context: usize,
+    after_context: usize, max_depth: Option<usize>, tx: &SyncSender<Result<SearchLine, RgApiError>>, cancel: &Arc<AtomicBool>,
 ) -> WalkState {
     if is_cancelled(cancel) {
         return WalkState::Quit;
@@ -191,14 +166,7 @@ fn search_entry(
     if !filters.path_allowed(&rel) {
         return WalkState::Continue;
     }
-    match search_path_cancelable(
-        path,
-        rel,
-        matcher.clone(),
-        before_context,
-        after_context,
-        Some(cancel.clone()),
-    ) {
+    match search_path_cancelable(path, rel, matcher.clone(), before_context, after_context, Some(cancel.clone())) {
         Ok(lines) => {
             if is_cancelled(cancel) {
                 return WalkState::Quit;
@@ -218,20 +186,12 @@ fn is_cancelled(cancel: &Arc<AtomicBool>) -> bool {
     cancel.load(Ordering::Relaxed)
 }
 
-fn send_search_error(
-    tx: &SyncSender<Result<SearchLine, RgApiError>>,
-    err: RgApiError,
-) -> WalkState {
+fn send_search_error(tx: &SyncSender<Result<SearchLine, RgApiError>>, err: RgApiError) -> WalkState {
     let _ = tx.send(Err(err));
     WalkState::Quit
 }
 
-pub fn compile_regex(
-    pattern: &str,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    multiline: bool,
-) -> Result<RegexMatcher, RgApiError> {
+pub fn compile_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: bool, multiline: bool) -> Result<RegexMatcher, RgApiError> {
     if pattern.is_empty() {
         return Err(RgApiError::new("pattern may not be empty"));
     }
@@ -254,9 +214,7 @@ pub fn compile_regex(
             builder.case_smart(smart_case);
         }
     }
-    builder
-        .build(pattern)
-        .map_err(|e| RgApiError::new(e.to_string()))
+    builder.build(pattern).map_err(|e| RgApiError::new(e.to_string()))
 }
 
 fn line_hash_u16(line: &str) -> u16 {
@@ -268,45 +226,20 @@ pub(crate) fn format_lnhash(lineno: u64, line: &str) -> String {
 }
 
 pub fn search_path(
-    path: &Path,
-    display_path: String,
-    matcher: RegexMatcher,
-    before_context: usize,
-    after_context: usize,
+    path: &Path, display_path: String, matcher: RegexMatcher, before_context: usize, after_context: usize,
 ) -> Result<Vec<SearchLine>, RgApiError> {
-    search_path_cancelable(
-        path,
-        display_path,
-        matcher,
-        before_context,
-        after_context,
-        None,
-    )
+    search_path_cancelable(path, display_path, matcher, before_context, after_context, None)
 }
 
 fn search_path_cancelable(
-    path: &Path,
-    display_path: String,
-    matcher: RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-    cancel: Option<Arc<AtomicBool>>,
+    path: &Path, display_path: String, matcher: RegexMatcher, before_context: usize, after_context: usize, cancel: Option<Arc<AtomicBool>>,
 ) -> Result<Vec<SearchLine>, RgApiError> {
     let mut builder = SearcherBuilder::new();
-    builder
-        .line_number(true)
-        .before_context(before_context)
-        .after_context(after_context)
-        .binary_detection(BinaryDetection::quit(0));
+    builder.line_number(true).before_context(before_context).after_context(after_context).binary_detection(BinaryDetection::quit(0));
     let mut searcher = builder.build();
     let mut out = Vec::new();
     let search_matcher = matcher.clone();
-    let sink = CollectSink {
-        path: display_path,
-        matcher,
-        lines: &mut out,
-        cancel,
-    };
+    let sink = CollectSink { path: display_path, matcher, lines: &mut out, cancel };
     match searcher.search_path(search_matcher, path, sink) {
         Ok(()) => Ok(out),
         Err(SearchError::InvalidUtf8) => Ok(Vec::new()),
@@ -314,48 +247,20 @@ fn search_path_cancelable(
     }
 }
 pub fn search_text(
-    display_path: String,
-    text: &str,
-    matcher: RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-    multiline: bool,
+    display_path: String, text: &str, matcher: RegexMatcher, before_context: usize, after_context: usize, multiline: bool,
 ) -> Result<Vec<SearchLine>, RgApiError> {
-    search_bytes(
-        display_path,
-        text.as_bytes(),
-        matcher,
-        before_context,
-        after_context,
-        multiline,
-    )
+    search_bytes(display_path, text.as_bytes(), matcher, before_context, after_context, multiline)
 }
 fn search_bytes(
-    display_path: String,
-    bytes: &[u8],
-    matcher: RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-    multiline: bool,
+    display_path: String, bytes: &[u8], matcher: RegexMatcher, before_context: usize, after_context: usize, multiline: bool,
 ) -> Result<Vec<SearchLine>, RgApiError> {
     let mut builder = SearcherBuilder::new();
-    builder
-        .line_number(true)
-        .before_context(before_context)
-        .after_context(after_context)
-        .multi_line(multiline);
+    builder.line_number(true).before_context(before_context).after_context(after_context).multi_line(multiline);
     let mut searcher = builder.build();
     let mut out = Vec::new();
     let search_matcher = matcher.clone();
-    let sink = CollectSink {
-        path: display_path,
-        matcher,
-        lines: &mut out,
-        cancel: None,
-    };
-    searcher
-        .search_slice(search_matcher, bytes, sink)
-        .map_err(|e| RgApiError::new(e.to_string()))?;
+    let sink = CollectSink { path: display_path, matcher, lines: &mut out, cancel: None };
+    searcher.search_slice(search_matcher, bytes, sink).map_err(|e| RgApiError::new(e.to_string()))?;
     Ok(out)
 }
 
@@ -377,11 +282,7 @@ impl CollectSink<'_> {
 impl Sink for CollectSink<'_> {
     type Error = SearchError;
 
-    fn matched(
-        &mut self,
-        _searcher: &grep_searcher::Searcher,
-        mat: &SinkMatch<'_>,
-    ) -> Result<bool, Self::Error> {
+    fn matched(&mut self, _searcher: &grep_searcher::Searcher, mat: &SinkMatch<'_>) -> Result<bool, Self::Error> {
         if self.cancelled() {
             return Ok(false);
         }
@@ -399,11 +300,7 @@ impl Sink for CollectSink<'_> {
         Ok(!self.cancelled())
     }
 
-    fn context(
-        &mut self,
-        _searcher: &grep_searcher::Searcher,
-        ctx: &SinkContext<'_>,
-    ) -> Result<bool, Self::Error> {
+    fn context(&mut self, _searcher: &grep_searcher::Searcher, ctx: &SinkContext<'_>) -> Result<bool, Self::Error> {
         if self.cancelled() {
             return Ok(false);
         }
@@ -424,11 +321,7 @@ impl Sink for CollectSink<'_> {
         });
         Ok(!self.cancelled())
     }
-    fn binary_data(
-        &mut self,
-        _searcher: &grep_searcher::Searcher,
-        _binary_byte_offset: u64,
-    ) -> Result<bool, Self::Error> {
+    fn binary_data(&mut self, _searcher: &grep_searcher::Searcher, _binary_byte_offset: u64) -> Result<bool, Self::Error> {
         self.lines.clear();
         Ok(false)
     }
@@ -457,17 +350,11 @@ fn bytes_to_line(bytes: &[u8]) -> Result<String, SearchError> {
     let s = std::str::from_utf8(bytes).map_err(|_| SearchError::InvalidUtf8)?;
     Ok(s.trim_end_matches(['\r', '\n']).to_string())
 }
-pub(crate) fn spans_for(
-    matcher: &RegexMatcher,
-    bytes: &[u8],
-) -> Result<Vec<MatchSpan>, SearchError> {
+pub(crate) fn spans_for(matcher: &RegexMatcher, bytes: &[u8]) -> Result<Vec<MatchSpan>, SearchError> {
     let mut spans = Vec::new();
     matcher
         .find_iter(bytes, |m| {
-            spans.push(MatchSpan {
-                start: m.start(),
-                end: m.end(),
-            });
+            spans.push(MatchSpan { start: m.start(), end: m.end() });
             true
         })
         .map_err(|e| SearchError::Message(e.to_string()))?;

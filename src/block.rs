@@ -8,9 +8,7 @@ use ignore::{DirEntry, WalkState};
 
 use crate::RgApiError;
 use crate::search::{RgOptions, SearchLine, compile_regex, format_lnhash, search_text};
-use crate::walk::{
-    PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk,
-};
+use crate::walk::{PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk};
 
 /// One blank-line-delimited block containing a match, or context for one.
 pub struct SearchBlock {
@@ -39,11 +37,7 @@ fn split_blocks(text: &str) -> Vec<BlockInfo> {
         let line_no = i as u64 + 1;
         if line.trim().is_empty() {
             if let Some(first) = start.take() {
-                blocks.push(BlockInfo {
-                    start_line: first,
-                    end_line: line_no - 1,
-                    source: lines.join("\n"),
-                });
+                blocks.push(BlockInfo { start_line: first, end_line: line_no - 1, source: lines.join("\n") });
                 lines.clear();
             }
         } else {
@@ -54,21 +48,13 @@ fn split_blocks(text: &str) -> Vec<BlockInfo> {
         }
     }
     if let Some(first) = start {
-        blocks.push(BlockInfo {
-            start_line: first,
-            end_line: text.lines().count() as u64,
-            source: lines.join("\n"),
-        });
+        blocks.push(BlockInfo { start_line: first, end_line: text.lines().count() as u64, source: lines.join("\n") });
     }
     blocks
 }
 
 fn process_file(
-    disp: String,
-    bytes: &[u8],
-    matcher: &RegexMatcher,
-    before_context: usize,
-    after_context: usize,
+    disp: String, bytes: &[u8], matcher: &RegexMatcher, before_context: usize, after_context: usize,
 ) -> Result<Vec<SearchBlock>, RgApiError> {
     if bytes.contains(&0) {
         return Ok(Vec::new());
@@ -84,11 +70,7 @@ fn process_file(
     }
     let mut matched: HashMap<usize, Vec<SearchLine>> = HashMap::new();
     for hit in hits {
-        if let Some((i, _)) = blocks
-            .iter()
-            .enumerate()
-            .find(|(_, b)| b.start_line <= hit.line_number && hit.line_number <= b.end_line)
-        {
+        if let Some((i, _)) = blocks.iter().enumerate().find(|(_, b)| b.start_line <= hit.line_number && hit.line_number <= b.end_line) {
             matched.entry(i).or_default().push(hit);
         }
     }
@@ -121,13 +103,8 @@ fn process_file(
 }
 
 fn block_entry(
-    entry: Result<DirEntry, ignore::Error>,
-    root: &Path,
-    filters: &PathFilters,
-    matcher: &RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-    max_depth: Option<usize>,
+    entry: Result<DirEntry, ignore::Error>, root: &Path, filters: &PathFilters, matcher: &RegexMatcher, before_context: usize,
+    after_context: usize, max_depth: Option<usize>,
 ) -> Result<Vec<SearchBlock>, RgApiError> {
     let dent = match entry {
         Ok(dent) => dent,
@@ -166,8 +143,7 @@ pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
         opts.skip_dir_re.as_deref(),
     )?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, false)?;
-    let (before_context, after_context, max_depth) =
-        (opts.before_context, opts.after_context, opts.max_depth);
+    let (before_context, after_context, max_depth) = (opts.before_context, opts.after_context, opts.max_depth);
     Ok(spawn_walk(
         root,
         ignore,
@@ -178,15 +154,7 @@ pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
         opts.follow_links,
         opts.same_file_system,
         filters,
-        move |dent, root, filters, tx, cancel| match block_entry(
-            dent,
-            root,
-            filters,
-            &matcher,
-            before_context,
-            after_context,
-            max_depth,
-        ) {
+        move |dent, root, filters, tx, cancel| match block_entry(dent, root, filters, &matcher, before_context, after_context, max_depth) {
             Ok(blocks) => {
                 for block in blocks {
                     if cancel.load(Ordering::Relaxed) || tx.send(Ok(block)).is_err() {

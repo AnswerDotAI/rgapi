@@ -78,8 +78,7 @@ pub fn find_iter(opts: &FindOptions) -> Result<FindIter, RgApiError> {
         opts.skip_dir_re.as_deref(),
     )?);
     let pattern = opts.pattern.as_deref().map(build_fd_re).transpose()?;
-    let (files, dirs, panic_probe, max_depth) =
-        (opts.files, opts.dirs, opts.panic_probe, opts.max_depth);
+    let (files, dirs, panic_probe, max_depth) = (opts.files, opts.dirs, opts.panic_probe, opts.max_depth);
     Ok(spawn_walk(
         root,
         ignore,
@@ -94,15 +93,7 @@ pub fn find_iter(opts: &FindOptions) -> Result<FindIter, RgApiError> {
             if panic_probe {
                 panic!("rgapi: deliberate panic for tests (panic_probe)");
             }
-            match find_entry(
-                dent,
-                root,
-                filters,
-                pattern.as_ref(),
-                files,
-                dirs,
-                max_depth,
-            ) {
+            match find_entry(dent, root, filters, pattern.as_ref(), files, dirs, max_depth) {
                 Ok(Some(path)) => {
                     if cancel.load(Ordering::Relaxed) || tx.send(Ok(path)).is_err() {
                         return WalkState::Quit;
@@ -134,18 +125,12 @@ impl<T> StreamIter<T> {
         self.cancel.clone()
     }
 
-    pub fn next_timeout(
-        &mut self,
-        timeout: std::time::Duration,
-    ) -> Result<Result<T, RgApiError>, mpsc::RecvTimeoutError> {
+    pub fn next_timeout(&mut self, timeout: std::time::Duration) -> Result<Result<T, RgApiError>, mpsc::RecvTimeoutError> {
         self.rx.recv_timeout(timeout)
     }
 
     /// Collect all items, stopping at `timeout_ms`; the bool is true when the deadline stopped it.
-    pub fn collect_timeout(
-        mut self,
-        timeout_ms: Option<u64>,
-    ) -> Result<(Vec<T>, bool), RgApiError> {
+    pub fn collect_timeout(mut self, timeout_ms: Option<u64>) -> Result<(Vec<T>, bool), RgApiError> {
         let Some(ms) = timeout_ms else {
             return Ok((self.collect::<Result<Vec<_>, _>>()?, false));
         };
@@ -181,26 +166,12 @@ impl<T> Drop for StreamIter<T> {
 
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_walk<T, F>(
-    root: PathBuf,
-    ignore: bool,
-    hidden: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    filters: Arc<PathFilters>,
-    entry: F,
+    root: PathBuf, ignore: bool, hidden: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>,
+    follow_links: bool, same_file_system: bool, filters: Arc<PathFilters>, entry: F,
 ) -> StreamIter<T>
 where
     T: Send + 'static,
-    F: Fn(
-            Result<DirEntry, ignore::Error>,
-            &Path,
-            &PathFilters,
-            &mpsc::SyncSender<Result<T, RgApiError>>,
-            &Arc<AtomicBool>,
-        ) -> WalkState
+    F: Fn(Result<DirEntry, ignore::Error>, &Path, &PathFilters, &mpsc::SyncSender<Result<T, RgApiError>>, &Arc<AtomicBool>) -> WalkState
         + Send
         + Sync
         + Clone
@@ -211,16 +182,7 @@ where
     let (tx, rx) = mpsc::sync_channel(8192);
     let worker = std::thread::spawn(move || {
         let mut walker = WalkBuilder::new(&root);
-        configure_walker(
-            &mut walker,
-            ignore,
-            hidden,
-            max_depth,
-            min_depth,
-            max_filesize,
-            follow_links,
-            same_file_system,
-        );
+        configure_walker(&mut walker, ignore, hidden, max_depth, min_depth, max_filesize, follow_links, same_file_system);
         filter_dirs(&mut walker, &root, filters.clone());
         walker.build_parallel().run(|| {
             let tx = tx.clone();
@@ -232,32 +194,18 @@ where
                 if cancel.load(Ordering::Relaxed) {
                     return WalkState::Quit;
                 }
-                catch_unwind(AssertUnwindSafe(|| {
-                    entry(dent, &root, &filters, &tx, &cancel)
-                }))
-                .unwrap_or_else(|_| {
-                    let _ = tx.send(Err(RgApiError::new(
-                        "internal error during search (this is a bug, please report it)",
-                    )));
+                catch_unwind(AssertUnwindSafe(|| entry(dent, &root, &filters, &tx, &cancel))).unwrap_or_else(|_| {
+                    let _ = tx.send(Err(RgApiError::new("internal error during search (this is a bug, please report it)")));
                     WalkState::Quit
                 })
             })
         });
     });
-    StreamIter {
-        rx,
-        cancel,
-        _worker: worker,
-    }
+    StreamIter { rx, cancel, _worker: worker }
 }
 
 fn find_entry(
-    entry: Result<DirEntry, ignore::Error>,
-    root: &Path,
-    filters: &PathFilters,
-    pattern: Option<&RegexMatcher>,
-    files: bool,
-    dirs: bool,
+    entry: Result<DirEntry, ignore::Error>, root: &Path, filters: &PathFilters, pattern: Option<&RegexMatcher>, files: bool, dirs: bool,
     max_depth: Option<usize>,
 ) -> Result<Option<String>, RgApiError> {
     let dent = match entry {
@@ -297,11 +245,7 @@ fn find_entry(
 // disable ignore rules and include hidden. Nothing is traversed below a file, so
 // the flags affect only the root itself.
 pub(crate) fn file_root_flags(root: &Path, ignore: bool, hidden: bool) -> (bool, bool) {
-    if root.is_file() {
-        (false, true)
-    } else {
-        (ignore, hidden)
-    }
+    if root.is_file() { (false, true) } else { (ignore, hidden) }
 }
 
 // At the max_depth cap the walker opens directories it will never descend into
@@ -309,47 +253,26 @@ pub(crate) fn file_root_flags(root: &Path, ignore: bool, hidden: bool) -> (bool,
 // harmless: skip them (None). Every other walk error is fatal (Some).
 pub(crate) fn entry_err(err: ignore::Error, max_depth: Option<usize>) -> Option<RgApiError> {
     let at_cap = max_depth.is_some_and(|m| err.depth().is_some_and(|d| d >= m));
-    let denied = err
-        .io_error()
-        .is_some_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
-    if at_cap && denied {
-        None
-    } else {
-        Some(RgApiError::new(err.to_string()))
-    }
+    let denied = err.io_error().is_some_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
+    if at_cap && denied { None } else { Some(RgApiError::new(err.to_string())) }
 }
 
 pub(crate) fn normalize_root(path: &Path) -> Result<PathBuf, RgApiError> {
-    if path.exists() {
-        Ok(path.canonicalize()?)
-    } else {
-        Err(RgApiError::new(format!(
-            "root does not exist: {}",
-            path.display()
-        )))
-    }
+    if path.exists() { Ok(path.canonicalize()?) } else { Err(RgApiError::new(format!("root does not exist: {}", path.display()))) }
 }
 
 pub(crate) fn rel_path(root: &Path, path: &Path) -> String {
     let rel = path.strip_prefix(root).unwrap_or(path);
     if rel.as_os_str().is_empty() {
         // A file root strips to nothing: report its name, matching the old parent-walk output.
-        return path
-            .file_name()
-            .map_or_else(String::new, |n| n.to_string_lossy().replace('\\', "/"));
+        return path.file_name().map_or_else(String::new, |n| n.to_string_lossy().replace('\\', "/"));
     }
     rel.to_string_lossy().replace('\\', "/")
 }
 
 pub(crate) fn configure_walker(
-    walker: &mut WalkBuilder,
-    ignore: bool,
-    hidden: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
+    walker: &mut WalkBuilder, ignore: bool, hidden: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>,
+    follow_links: bool, same_file_system: bool,
 ) {
     walker.standard_filters(ignore);
     if ignore {
@@ -381,12 +304,7 @@ pub(crate) struct PathFilters {
 
 impl PathFilters {
     pub(crate) fn new(
-        includes: &[String],
-        excludes: &[String],
-        exts: &[String],
-        path_re: Option<&str>,
-        skip_path_re: Option<&str>,
-        skip_dirs: &[String],
+        includes: &[String], excludes: &[String], exts: &[String], path_re: Option<&str>, skip_path_re: Option<&str>, skip_dirs: &[String],
         skip_dir_re: Option<&str>,
     ) -> Result<Self, RgApiError> {
         Ok(Self {
@@ -462,11 +380,7 @@ pub(crate) fn build_globs(globs: &[String]) -> Result<Option<GlobSet>, RgApiErro
     for glob in globs {
         add_glob(&mut builder, glob)?;
     }
-    Ok(Some(
-        builder
-            .build()
-            .map_err(|e| RgApiError::new(e.to_string()))?,
-    ))
+    Ok(Some(builder.build().map_err(|e| RgApiError::new(e.to_string()))?))
 }
 
 fn add_glob(builder: &mut GlobSetBuilder, glob: &str) -> Result<(), RgApiError> {
@@ -480,19 +394,11 @@ fn add_glob(builder: &mut GlobSetBuilder, glob: &str) -> Result<(), RgApiError> 
 fn build_fd_re(pattern: &str) -> Result<RegexMatcher, RgApiError> {
     let mut builder = RegexMatcherBuilder::new();
     builder.case_smart(true);
-    builder
-        .build(pattern)
-        .map_err(|e| RgApiError::new(e.to_string()))
+    builder.build(pattern).map_err(|e| RgApiError::new(e.to_string()))
 }
 
 fn build_path_re(pattern: Option<&str>) -> Result<Option<RegexMatcher>, RgApiError> {
-    pattern
-        .map(|pattern| {
-            RegexMatcherBuilder::new()
-                .build(pattern)
-                .map_err(|e| RgApiError::new(e.to_string()))
-        })
-        .transpose()
+    pattern.map(|pattern| RegexMatcherBuilder::new().build(pattern).map_err(|e| RgApiError::new(e.to_string()))).transpose()
 }
 
 fn re_match(matcher: &RegexMatcher, rel: &str) -> bool {
@@ -514,11 +420,7 @@ mod tests {
                 }
             }
         });
-        StreamIter {
-            rx,
-            cancel,
-            _worker: worker,
-        }
+        StreamIter { rx, cancel, _worker: worker }
     }
 
     #[test]
@@ -527,9 +429,7 @@ mod tests {
         assert_eq!(got, vec![1, 2, 3]);
         assert!(!timed_out);
 
-        let (got, timed_out) = iter_of(vec![1, 2, 3], 0)
-            .collect_timeout(Some(60_000))
-            .unwrap();
+        let (got, timed_out) = iter_of(vec![1, 2, 3], 0).collect_timeout(Some(60_000)).unwrap();
         assert_eq!(got, vec![1, 2, 3]);
         assert!(!timed_out);
 
@@ -537,9 +437,7 @@ mod tests {
         assert!(got.is_empty());
         assert!(timed_out);
 
-        let (got, timed_out) = iter_of(vec![1, 2, 3], 200)
-            .collect_timeout(Some(20))
-            .unwrap();
+        let (got, timed_out) = iter_of(vec![1, 2, 3], 200).collect_timeout(Some(20)).unwrap();
         assert!(got.is_empty());
         assert!(timed_out);
     }

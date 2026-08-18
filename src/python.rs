@@ -11,10 +11,9 @@ use pyo3::types::{PyAny, PyDict};
 
 use crate::search::spans_for;
 use crate::{
-    FindIter, FindOptions, NbCell, NbIter, NbOptions, RgIter, RgOptions, SearchBlock, SearchLine,
-    StreamIter, block_iter as block_iter_core, compile_regex, find, find_iter as find_iter_core,
-    nb_iter as nb_iter_core, nb_search_file, rg_iter as rg_iter_core,
-    search_path as search_path_core, search_text as search_text_core,
+    FindIter, FindOptions, NbCell, NbIter, NbOptions, RgIter, RgOptions, SearchBlock, SearchLine, StreamIter,
+    block_iter as block_iter_core, compile_regex, find, find_iter as find_iter_core, nb_iter as nb_iter_core, nb_search_file,
+    rg_iter as rg_iter_core, search_path as search_path_core, search_text as search_text_core,
 };
 use std::path::Path;
 
@@ -76,29 +75,15 @@ impl SearchLinePy {
     }
     fn __str__(&self) -> String {
         let sep = if self.kind == "match" { ":" } else { "-" };
-        let prefix = if self.path.is_empty() {
-            String::new()
-        } else {
-            format!("{}{}", self.path, sep)
-        };
+        let prefix = if self.path.is_empty() { String::new() } else { format!("{}{}", self.path, sep) };
         if self.display_lnhash {
             format!("{}{}{}", prefix, self.lnhash, preview(&self.line, MAXLEN))
         } else {
-            format!(
-                "{}{}{}{}",
-                prefix,
-                self.line_number,
-                sep,
-                preview(&self.line, MAXLEN)
-            )
+            format!("{}{}{}{}", prefix, self.line_number, sep, preview(&self.line, MAXLEN))
         }
     }
     fn _repr_pretty_(&self, p: &Bound<'_, PyAny>, cycle: bool) -> PyResult<()> {
-        let text = if cycle {
-            "...".to_string()
-        } else {
-            self.__str__()
-        };
+        let text = if cycle { "...".to_string() } else { self.__str__() };
         p.call_method1("text", (text,))?;
         Ok(())
     }
@@ -127,11 +112,7 @@ impl RgIterPy {
         self.__repr__()
     }
     fn _repr_pretty_(&self, p: &Bound<'_, PyAny>, cycle: bool) -> PyResult<()> {
-        let text = if cycle {
-            "...".to_string()
-        } else {
-            self.__str__()
-        };
+        let text = if cycle { "...".to_string() } else { self.__str__() };
         p.call_method1("text", (text,))?;
         Ok(())
     }
@@ -159,10 +140,7 @@ fn next_stream_py<T: Send>(py: Python<'_>, iter: &mut StreamIter<T>) -> PyResult
 }
 
 fn collect_stream_py<T: Send, P>(
-    py: Python<'_>,
-    mut iter: StreamIter<T>,
-    conv: impl Fn(T) -> P,
-    timeout_ms: Option<u64>,
+    py: Python<'_>, mut iter: StreamIter<T>, conv: impl Fn(T) -> P, timeout_ms: Option<u64>,
 ) -> PyResult<(Vec<P>, bool)> {
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let mut res = Vec::new();
@@ -206,9 +184,7 @@ impl RegexPy {
         compile_regex_py(pattern, case_sensitive, smart_case)
     }
     fn is_match(&self, text: &str) -> PyResult<bool> {
-        self.matcher
-            .is_match(text.as_bytes())
-            .map_err(|e| PyValueError::new_err(e.to_string()))
+        self.matcher.is_match(text.as_bytes()).map_err(|e| PyValueError::new_err(e.to_string()))
     }
     fn finditer(&self, text: &str) -> PyResult<Vec<(usize, usize)>> {
         spans_for(&self.matcher, text.as_bytes())
@@ -230,57 +206,25 @@ impl RegexPy {
         self.__repr__()
     }
     fn _repr_pretty_(&self, p: &Bound<'_, PyAny>, cycle: bool) -> PyResult<()> {
-        let text = if cycle {
-            "...".to_string()
-        } else {
-            self.__str__()
-        };
+        let text = if cycle { "...".to_string() } else { self.__str__() };
         p.call_method1("text", (text,))?;
         Ok(())
     }
 }
-fn compile_regex_py(
-    pattern: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-) -> PyResult<RegexPy> {
-    let matcher = compile_regex(&pattern, case_sensitive, smart_case, false)
-        .map_err(|e| PyValueError::new_err(e.to_string()))?;
-    Ok(RegexPy {
-        pattern,
-        case_sensitive,
-        smart_case,
-        matcher,
-    })
+fn compile_regex_py(pattern: String, case_sensitive: Option<bool>, smart_case: bool) -> PyResult<RegexPy> {
+    let matcher = compile_regex(&pattern, case_sensitive, smart_case, false).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(RegexPy { pattern, case_sensitive, smart_case, matcher })
 }
 #[pyfunction(name = "compile")]
 #[pyo3(signature = (pattern, case_sensitive=None, smart_case=false))]
-fn compile_py(
-    pattern: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-) -> PyResult<RegexPy> {
+fn compile_py(pattern: String, case_sensitive: Option<bool>, smart_case: bool) -> PyResult<RegexPy> {
     compile_regex_py(pattern, case_sensitive, smart_case)
 }
 fn find_opts(
-    root: &str,
-    pattern: Option<String>,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
+    root: &str, pattern: Option<String>, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>,
+    hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, files: bool, dirs: bool,
 ) -> FindOptions {
     FindOptions {
         root: PathBuf::from(root),
@@ -308,22 +252,9 @@ fn find_opts(
 #[pyfunction(name = "walk")]
 #[pyo3(signature = (root=".", hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false, timeout_ms=None))]
 fn walk_py(
-    py: Python<'_>,
-    root: &str,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
-    timeout_ms: Option<u64>,
+    py: Python<'_>, root: &str, hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>,
+    follow_links: bool, same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, files: bool, dirs: bool, timeout_ms: Option<u64>,
 ) -> PyResult<(Vec<String>, bool)> {
     let opts = find_opts(
         root,
@@ -352,26 +283,10 @@ fn walk_py(
 #[pyfunction(name = "find")]
 #[pyo3(signature = (root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false, timeout_ms=None))]
 fn find_py(
-    py: Python<'_>,
-    root: &str,
-    pattern: Option<String>,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
-    timeout_ms: Option<u64>,
+    py: Python<'_>, root: &str, pattern: Option<String>, include: Option<Vec<String>>, exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>, hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>,
+    follow_links: bool, same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, files: bool, dirs: bool, timeout_ms: Option<u64>,
 ) -> PyResult<(Vec<String>, bool)> {
     let opts = find_opts(
         root,
@@ -399,66 +314,29 @@ fn find_py(
 #[pyfunction(name = "search_text")]
 #[pyo3(signature = (matcher, text, path="<text>", before_context=0, after_context=0))]
 fn search_text_py(
-    matcher: PyRef<'_, RegexPy>,
-    text: &str,
-    path: &str,
-    before_context: usize,
-    after_context: usize,
+    matcher: PyRef<'_, RegexPy>, text: &str, path: &str, before_context: usize, after_context: usize,
 ) -> PyResult<Vec<SearchLinePy>> {
-    search_text_core(
-        path.to_string(),
-        text,
-        matcher.matcher.clone(),
-        before_context,
-        after_context,
-        false,
-    )
-    .map(|lines| lines.into_iter().map(SearchLinePy::from).collect())
-    .map_err(|e| PyValueError::new_err(e.to_string()))
+    search_text_core(path.to_string(), text, matcher.matcher.clone(), before_context, after_context, false)
+        .map(|lines| lines.into_iter().map(SearchLinePy::from).collect())
+        .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 #[pyfunction(name = "search_path")]
 #[pyo3(signature = (matcher, path, display_path=None, before_context=0, after_context=0))]
 fn search_path_py(
-    matcher: PyRef<'_, RegexPy>,
-    path: &str,
-    display_path: Option<String>,
-    before_context: usize,
-    after_context: usize,
+    matcher: PyRef<'_, RegexPy>, path: &str, display_path: Option<String>, before_context: usize, after_context: usize,
 ) -> PyResult<Vec<SearchLinePy>> {
     let path_buf = PathBuf::from(path);
     let display = display_path.unwrap_or_else(|| path_buf.to_string_lossy().replace('\\', "/"));
-    search_path_core(
-        &path_buf,
-        display,
-        matcher.matcher.clone(),
-        before_context,
-        after_context,
-    )
-    .map(|lines| lines.into_iter().map(SearchLinePy::from).collect())
-    .map_err(|e| PyValueError::new_err(e.to_string()))
+    search_path_core(&path_buf, display, matcher.matcher.clone(), before_context, after_context)
+        .map(|lines| lines.into_iter().map(SearchLinePy::from).collect())
+        .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 fn rg_opts(
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
+    pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>, hidden: bool,
+    ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize,
 ) -> RgOptions {
     RgOptions {
         root: PathBuf::from(root),
@@ -488,28 +366,10 @@ fn rg_opts(
 #[pyfunction(name = "rg")]
 #[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false, timeout_ms=None))]
 fn rg_py(
-    py: Python<'_>,
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
-    lnhash: bool,
+    py: Python<'_>, pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>,
+    hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize, lnhash: bool,
     timeout_ms: Option<u64>,
 ) -> PyResult<(Vec<SearchLinePy>, bool)> {
     let opts = rg_opts(
@@ -542,27 +402,10 @@ fn rg_py(
 #[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, timeout_ms=None))]
 #[allow(clippy::too_many_arguments)]
 fn block_search_py(
-    py: Python<'_>,
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
+    py: Python<'_>, pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>,
+    hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize,
     timeout_ms: Option<u64>,
 ) -> PyResult<(Vec<BlockRow>, bool)> {
     let opts = rg_opts(
@@ -593,27 +436,10 @@ fn block_search_py(
 #[pyfunction(name = "rg_iter")]
 #[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false))]
 fn rg_iter_py(
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
-    lnhash: bool,
+    pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>, hidden: bool,
+    ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize, lnhash: bool,
 ) -> PyResult<RgIterPy> {
     let opts = rg_opts(
         pattern,
@@ -637,12 +463,7 @@ fn rg_iter_py(
         before_context,
         after_context,
     );
-    rg_iter_core(&opts)
-        .map(|inner| RgIterPy {
-            inner,
-            display_lnhash: lnhash,
-        })
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+    rg_iter_core(&opts).map(|inner| RgIterPy { inner, display_lnhash: lnhash }).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 #[pyclass(name = "FindIter", unsendable)]
@@ -668,24 +489,10 @@ impl FindIterPy {
 #[pyfunction(name = "find_iter")]
 #[pyo3(signature = (root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
 fn find_iter_py(
-    root: &str,
-    pattern: Option<String>,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
+    root: &str, pattern: Option<String>, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>,
+    hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, files: bool, dirs: bool,
 ) -> PyResult<FindIterPy> {
     let opts = find_opts(
         root,
@@ -707,9 +514,7 @@ fn find_iter_py(
         files,
         dirs,
     );
-    find_iter_core(&opts)
-        .map(|inner| FindIterPy { inner })
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+    find_iter_core(&opts).map(|inner| FindIterPy { inner }).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 #[pyclass(name = "AsyncHandle")]
@@ -727,26 +532,10 @@ impl AsyncHandlePy {
 #[pyfunction(name = "find_async")]
 #[pyo3(signature = (cb, root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false, timeout_ms=None))]
 fn find_async_py(
-    cb: Py<PyAny>,
-    root: &str,
-    pattern: Option<String>,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
-    timeout_ms: Option<u64>,
+    cb: Py<PyAny>, root: &str, pattern: Option<String>, include: Option<Vec<String>>, exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>, hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>,
+    follow_links: bool, same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, files: bool, dirs: bool, timeout_ms: Option<u64>,
 ) -> PyResult<AsyncHandlePy> {
     let opts = find_opts(
         root,
@@ -770,35 +559,17 @@ fn find_async_py(
     );
     let iter = find_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
-    Ok(stream_async(cb, iter, deadline, |py, paths, timed_out| {
-        Ok((paths, timed_out).into_pyobject(py)?.into_any().unbind())
-    }))
+    Ok(stream_async(cb, iter, deadline, |py, paths, timed_out| Ok((paths, timed_out).into_pyobject(py)?.into_any().unbind())))
 }
 
 #[pyfunction(name = "find_iter_async")]
 #[pyo3(signature = (cb, batch_max, root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false))]
 #[allow(clippy::too_many_arguments)]
 fn find_iter_async_py(
-    cb: Py<PyAny>,
-    batch_max: usize,
-    root: &str,
-    pattern: Option<String>,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
+    cb: Py<PyAny>, batch_max: usize, root: &str, pattern: Option<String>, include: Option<Vec<String>>, exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>, hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>,
+    follow_links: bool, same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, files: bool, dirs: bool,
 ) -> PyResult<AsyncHandlePy> {
     let opts = find_opts(
         root,
@@ -821,16 +592,10 @@ fn find_iter_async_py(
         dirs,
     );
     let iter = find_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
-    Ok(stream_iter_async(cb, iter, batch_max, |py, paths| {
-        Ok(paths.into_pyobject(py)?.into_any().unbind())
-    }))
+    Ok(stream_iter_async(cb, iter, batch_max, |py, paths| Ok(paths.into_pyobject(py)?.into_any().unbind())))
 }
 
-fn drain_stream<T>(
-    iter: &mut StreamIter<T>,
-    flag: &Arc<AtomicBool>,
-    deadline: Option<Instant>,
-) -> (Vec<T>, bool, Option<String>) {
+fn drain_stream<T>(iter: &mut StreamIter<T>, flag: &Arc<AtomicBool>, deadline: Option<Instant>) -> (Vec<T>, bool, Option<String>) {
     let mut rows = Vec::new();
     let (mut timed_out, mut err) = (false, None);
     loop {
@@ -861,12 +626,7 @@ fn drain_stream<T>(
     (rows, timed_out, err)
 }
 
-fn stream_async<T, C>(
-    cb: Py<PyAny>,
-    mut iter: StreamIter<T>,
-    deadline: Option<Instant>,
-    conv: C,
-) -> AsyncHandlePy
+fn stream_async<T, C>(cb: Py<PyAny>, mut iter: StreamIter<T>, deadline: Option<Instant>, conv: C) -> AsyncHandlePy
 where
     T: Send + 'static,
     C: Fn(Python<'_>, Vec<T>, bool) -> PyResult<Py<PyAny>> + Send + 'static,
@@ -889,12 +649,7 @@ where
     AsyncHandlePy { cancel }
 }
 
-fn stream_iter_async<T, C>(
-    cb: Py<PyAny>,
-    mut iter: StreamIter<T>,
-    batch_max: usize,
-    conv: C,
-) -> AsyncHandlePy
+fn stream_iter_async<T, C>(cb: Py<PyAny>, mut iter: StreamIter<T>, batch_max: usize, conv: C) -> AsyncHandlePy
 where
     T: Send + 'static,
     C: Fn(Python<'_>, Vec<T>) -> PyResult<Py<PyAny>> + Send + 'static,
@@ -948,28 +703,10 @@ where
 #[pyo3(signature = (cb, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false, timeout_ms=None))]
 #[allow(clippy::too_many_arguments)]
 fn rg_async_py(
-    cb: Py<PyAny>,
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
-    lnhash: bool,
+    cb: Py<PyAny>, pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>,
+    hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize, lnhash: bool,
     timeout_ms: Option<u64>,
 ) -> PyResult<AsyncHandlePy> {
     let opts = rg_opts(
@@ -996,45 +733,20 @@ fn rg_async_py(
     );
     let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
-    Ok(stream_async(
-        cb,
-        iter,
-        deadline,
-        move |py, rows, timed_out| {
-            let rows: Vec<SearchLinePy> = rows
-                .into_iter()
-                .map(|l| search_line_py(l, lnhash))
-                .collect();
-            Ok((rows, timed_out).into_pyobject(py)?.into_any().unbind())
-        },
-    ))
+    Ok(stream_async(cb, iter, deadline, move |py, rows, timed_out| {
+        let rows: Vec<SearchLinePy> = rows.into_iter().map(|l| search_line_py(l, lnhash)).collect();
+        Ok((rows, timed_out).into_pyobject(py)?.into_any().unbind())
+    }))
 }
 
 #[pyfunction(name = "block_search_async")]
 #[pyo3(signature = (cb, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, timeout_ms=None))]
 #[allow(clippy::too_many_arguments)]
 fn block_search_async_py(
-    cb: Py<PyAny>,
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
+    cb: Py<PyAny>, pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>,
+    hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize,
     timeout_ms: Option<u64>,
 ) -> PyResult<AsyncHandlePy> {
     let opts = rg_opts(
@@ -1071,29 +783,10 @@ fn block_search_async_py(
 #[pyo3(signature = (cb, batch_max, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, before_context=0, after_context=0, lnhash=false))]
 #[allow(clippy::too_many_arguments)]
 fn rg_iter_async_py(
-    cb: Py<PyAny>,
-    batch_max: usize,
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
-    lnhash: bool,
+    cb: Py<PyAny>, batch_max: usize, pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>, hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>,
+    follow_links: bool, same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize, lnhash: bool,
 ) -> PyResult<AsyncHandlePy> {
     let opts = rg_opts(
         pattern,
@@ -1119,10 +812,7 @@ fn rg_iter_async_py(
     );
     let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(stream_iter_async(cb, iter, batch_max, move |py, rows| {
-        let rows: Vec<SearchLinePy> = rows
-            .into_iter()
-            .map(|l| search_line_py(l, lnhash))
-            .collect();
+        let rows: Vec<SearchLinePy> = rows.into_iter().map(|l| search_line_py(l, lnhash)).collect();
         Ok(rows.into_pyobject(py)?.into_any().unbind())
     }))
 }
@@ -1132,36 +822,17 @@ fn rg_iter_async_py(
 fn panic_probe_py(py: Python<'_>, root: &str, walk: bool) -> PyResult<()> {
     let root = PathBuf::from(root);
     if walk {
-        let opts = FindOptions {
-            root,
-            panic_probe: true,
-            ..FindOptions::default()
-        };
+        let opts = FindOptions { root, panic_probe: true, ..FindOptions::default() };
         find(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     } else {
-        let opts = RgOptions {
-            root,
-            pattern: "panic_probe".to_string(),
-            panic_probe: true,
-            ..RgOptions::default()
-        };
+        let opts = RgOptions { root, pattern: "panic_probe".to_string(), panic_probe: true, ..RgOptions::default() };
         let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
         collect_stream_py(py, iter, |l| search_line_py(l, false), None)?;
     }
     Ok(())
 }
 
-type BlockRow = (
-    String,
-    usize,
-    u64,
-    u64,
-    String,
-    String,
-    String,
-    String,
-    Vec<SearchLinePy>,
-);
+type BlockRow = (String, usize, u64, u64, String, String, String, String, Vec<SearchLinePy>);
 
 fn block_row(block: SearchBlock) -> BlockRow {
     (
@@ -1177,15 +848,7 @@ fn block_row(block: SearchBlock) -> BlockRow {
     )
 }
 
-type NbRow = (
-    String,
-    usize,
-    String,
-    String,
-    String,
-    String,
-    Vec<SearchLinePy>,
-);
+type NbRow = (String, usize, String, String, String, String, Vec<SearchLinePy>);
 
 fn nb_row(cell: NbCell) -> NbRow {
     (
@@ -1201,26 +864,10 @@ fn nb_row(cell: NbCell) -> NbRow {
 
 #[allow(clippy::too_many_arguments)]
 fn nb_opts(
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
+    pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>, hidden: bool,
+    ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool,
 ) -> NbOptions {
     NbOptions {
         root: PathBuf::from(root),
@@ -1270,27 +917,10 @@ impl NbIterPy {
 #[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, multiline=false, timeout_ms=None))]
 #[allow(clippy::too_many_arguments)]
 fn nb_search_py(
-    py: Python<'_>,
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
+    py: Python<'_>, pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>,
+    hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool,
     timeout_ms: Option<u64>,
 ) -> PyResult<(Vec<NbRow>, bool)> {
     let opts = nb_opts(
@@ -1323,26 +953,10 @@ fn nb_search_py(
 #[pyo3(signature = (pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, multiline=false))]
 #[allow(clippy::too_many_arguments)]
 fn nb_iter_py(
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
+    pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>, hidden: bool,
+    ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool,
 ) -> PyResult<NbIterPy> {
     let opts = nb_opts(
         pattern,
@@ -1366,36 +980,17 @@ fn nb_iter_py(
         cell_context,
         multiline,
     );
-    nb_iter_core(&opts)
-        .map(|inner| NbIterPy { inner })
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+    nb_iter_core(&opts).map(|inner| NbIterPy { inner }).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 #[pyfunction(name = "nb_search_async")]
 #[pyo3(signature = (cb, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, multiline=false, timeout_ms=None))]
 #[allow(clippy::too_many_arguments)]
 fn nb_search_async_py(
-    cb: Py<PyAny>,
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
+    cb: Py<PyAny>, pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>, exts: Option<Vec<String>>,
+    hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>, follow_links: bool,
+    same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool,
     timeout_ms: Option<u64>,
 ) -> PyResult<AsyncHandlePy> {
     let opts = nb_opts(
@@ -1432,28 +1027,10 @@ fn nb_search_async_py(
 #[pyo3(signature = (cb, batch_max, pattern, root=".", include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, case_sensitive=None, smart_case=false, cell_context=0, multiline=false))]
 #[allow(clippy::too_many_arguments)]
 fn nb_iter_async_py(
-    cb: Py<PyAny>,
-    batch_max: usize,
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
+    cb: Py<PyAny>, batch_max: usize, pattern: String, root: &str, include: Option<Vec<String>>, exclude: Option<Vec<String>>,
+    exts: Option<Vec<String>>, hidden: bool, ignore: bool, max_depth: Option<usize>, min_depth: Option<usize>, max_filesize: Option<u64>,
+    follow_links: bool, same_file_system: bool, path_re: Option<String>, skip_path_re: Option<String>, skip_dir: Option<Vec<String>>,
+    skip_dir_re: Option<String>, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool,
 ) -> PyResult<AsyncHandlePy> {
     let opts = nb_opts(
         pattern,
@@ -1487,24 +1064,10 @@ fn nb_iter_async_py(
 #[pyfunction(name = "nb_search_file")]
 #[pyo3(signature = (pattern, path, display_path, case_sensitive=None, smart_case=false, cell_context=0, multiline=false))]
 fn nb_search_file_py(
-    pattern: &str,
-    path: &str,
-    display_path: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
+    pattern: &str, path: &str, display_path: String, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool,
 ) -> PyResult<Vec<NbRow>> {
-    let cells = nb_search_file(
-        Path::new(path),
-        display_path,
-        pattern,
-        case_sensitive,
-        smart_case,
-        cell_context,
-        multiline,
-    )
-    .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let cells = nb_search_file(Path::new(path), display_path, pattern, case_sensitive, smart_case, cell_context, multiline)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(cells.into_iter().map(nb_row).collect())
 }
 
@@ -1523,10 +1086,7 @@ impl From<SearchLine> for SearchLinePy {
 }
 
 fn search_line_py(line: SearchLine, display_lnhash: bool) -> SearchLinePy {
-    SearchLinePy {
-        display_lnhash,
-        ..SearchLinePy::from(line)
-    }
+    SearchLinePy { display_lnhash, ..SearchLinePy::from(line) }
 }
 
 #[pymodule]

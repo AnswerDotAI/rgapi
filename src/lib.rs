@@ -10,10 +10,7 @@ mod python;
 
 pub use block::{BlockIter, SearchBlock, block_iter};
 pub use nb::{NbCell, NbIter, NbOptions, nb_iter, nb_search, nb_search_file};
-pub use search::{
-    MatchSpan, RgIter, RgOptions, SearchKind, SearchLine, compile_regex, rg, rg_iter, search_path,
-    search_text,
-};
+pub use search::{MatchSpan, RgIter, RgOptions, SearchKind, SearchLine, compile_regex, rg, rg_iter, search_path, search_text};
 pub use walk::{FindIter, FindOptions, StreamIter, find, find_iter};
 
 #[derive(Debug, Clone)]

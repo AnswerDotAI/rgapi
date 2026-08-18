@@ -9,9 +9,7 @@ use serde::Deserialize;
 
 use crate::RgApiError;
 use crate::search::{SearchLine, compile_regex, search_text};
-use crate::walk::{
-    PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk,
-};
+use crate::walk::{PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk};
 
 #[derive(Debug, Clone)]
 pub struct NbOptions {
@@ -97,11 +95,7 @@ impl Source {
 }
 
 fn process_file(
-    disp: String,
-    bytes: &[u8],
-    matcher: &RegexMatcher,
-    cell_context: usize,
-    multiline: bool,
+    disp: String, bytes: &[u8], matcher: &RegexMatcher, cell_context: usize, multiline: bool,
 ) -> Result<Vec<NbCell>, RgApiError> {
     // Not a parseable notebook (bad JSON, or JSON that isn't a notebook): skip, like a binary file.
     let nb: RawNb = match serde_json::from_slice(bytes) {
@@ -117,11 +111,7 @@ fn process_file(
         if !hits.is_empty() {
             matched.push((i, hits));
         }
-        info.push((
-            cell.id_string(i),
-            cell.cell_type.clone().unwrap_or_default(),
-            src,
-        ));
+        info.push((cell.id_string(i), cell.cell_type.clone().unwrap_or_default(), src));
     }
     if matched.is_empty() {
         return Ok(Vec::new());
@@ -141,11 +131,7 @@ fn process_file(
     let mut out = Vec::with_capacity(emit.len());
     for (i, is_match) in emit {
         let (cid, ctype, src) = &info[i];
-        let (kind, matches) = if is_match {
-            ("match", matched.remove(&i).unwrap_or_default())
-        } else {
-            ("context", Vec::new())
-        };
+        let (kind, matches) = if is_match { ("match", matched.remove(&i).unwrap_or_default()) } else { ("context", Vec::new()) };
         out.push(NbCell {
             path: disp.clone(),
             cell_index: i,
@@ -159,17 +145,10 @@ fn process_file(
     Ok(out)
 }
 
-fn compile_nb_regex(
-    pattern: &str,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    multiline: bool,
-) -> Result<RegexMatcher, RgApiError> {
+fn compile_nb_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: bool, multiline: bool) -> Result<RegexMatcher, RgApiError> {
     compile_regex(pattern, case_sensitive, smart_case, multiline).map_err(|e| {
         if !multiline && e.to_string().contains("not allowed in a regex") {
-            RgApiError::new(format!(
-                "{e}; pass multiline=True to let the pattern match across lines within a cell"
-            ))
+            RgApiError::new(format!("{e}; pass multiline=True to let the pattern match across lines within a cell"))
         } else {
             e
         }
@@ -177,13 +156,7 @@ fn compile_nb_regex(
 }
 
 pub fn nb_search_file(
-    path: &Path,
-    display_path: String,
-    pattern: &str,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
+    path: &Path, display_path: String, pattern: &str, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool,
 ) -> Result<Vec<NbCell>, RgApiError> {
     let matcher = compile_nb_regex(pattern, case_sensitive, smart_case, multiline)?;
     let bytes = match std::fs::read(path) {
@@ -194,13 +167,8 @@ pub fn nb_search_file(
 }
 
 fn nb_entry(
-    entry: Result<DirEntry, ignore::Error>,
-    root: &Path,
-    filters: &PathFilters,
-    matcher: &RegexMatcher,
-    cell_context: usize,
-    multiline: bool,
-    max_depth: Option<usize>,
+    entry: Result<DirEntry, ignore::Error>, root: &Path, filters: &PathFilters, matcher: &RegexMatcher, cell_context: usize,
+    multiline: bool, max_depth: Option<usize>,
 ) -> Result<Vec<NbCell>, RgApiError> {
     let dent = match entry {
         Ok(dent) => dent,
@@ -238,12 +206,7 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
         &opts.skip_dirs,
         opts.skip_dir_re.as_deref(),
     )?);
-    let matcher = compile_nb_regex(
-        &opts.pattern,
-        opts.case_sensitive,
-        opts.smart_case,
-        opts.multiline,
-    )?;
+    let matcher = compile_nb_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, opts.multiline)?;
     let cell_context = opts.cell_context;
     let multiline = opts.multiline;
     let max_depth = opts.max_depth;
@@ -257,15 +220,7 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
         opts.follow_links,
         opts.same_file_system,
         filters,
-        move |dent, root, filters, tx, cancel| match nb_entry(
-            dent,
-            root,
-            filters,
-            &matcher,
-            cell_context,
-            multiline,
-            max_depth,
-        ) {
+        move |dent, root, filters, tx, cancel| match nb_entry(dent, root, filters, &matcher, cell_context, multiline, max_depth) {
             Ok(cells) => {
                 for cell in cells {
                     if cancel.load(Ordering::Relaxed) || tx.send(Ok(cell)).is_err() {
