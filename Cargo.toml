@@ -30,3 +30,6 @@ extension-module = ["python", "pyo3/extension-module"]
 
 [lints.clippy]
 too_many_arguments = "allow"
+
+[profile.release]
+strip = true
