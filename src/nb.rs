@@ -49,10 +49,7 @@ pub struct NbCell {
 // Lean notebook model: only the fields we search; outputs/metadata are skipped by serde
 // without being allocated, which is the whole memory win over materializing the JSON in Python.
 #[derive(Deserialize)]
-struct RawNb {
-    #[serde(default)]
-    cells: Vec<RawCell>,
-}
+struct RawNb { #[serde(default)] cells: Vec<RawCell> }
 
 #[derive(Deserialize)]
 struct RawCell {
@@ -66,11 +63,7 @@ struct RawCell {
 
 impl RawCell {
     fn id_string(&self, index: usize) -> String {
-        match &self.id {
-            Some(serde_json::Value::String(s)) => s.clone(),
-            Some(v) => v.to_string(),
-            None => index.to_string(),
-        }
+        match &self.id { Some(serde_json::Value::String(s)) => s.clone(), Some(v) => v.to_string(), None => index.to_string() }
     }
 }
 
@@ -84,46 +77,25 @@ enum Source {
     Empty,
 }
 
-impl Source {
-    fn text(&self) -> String {
-        match self {
-            Source::Lines(v) => v.concat(),
-            Source::Text(s) => s.clone(),
-            Source::Empty => String::new(),
-        }
-    }
-}
+impl Source { fn text(&self) -> String { match self { Source::Lines(v) => v.concat(), Source::Text(s) => s.clone(), Source::Empty => String::new() } } }
 
 fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, cell_context: usize, multiline: bool) -> Result<Vec<NbCell>, RgApiError> {
     // Not a parseable notebook (bad JSON, or JSON that isn't a notebook): skip, like a binary file.
-    let nb: RawNb = match serde_json::from_slice(bytes) {
-        Ok(nb) => nb,
-        Err(_) => return Ok(Vec::new()),
-    };
+    let nb: RawNb = match serde_json::from_slice(bytes) { Ok(nb) => nb, Err(_) => return Ok(Vec::new()) };
     let n = nb.cells.len();
     let mut info = Vec::with_capacity(n);
     let mut matched: Vec<(usize, Vec<SearchLine>)> = Vec::new();
     for (i, cell) in nb.cells.iter().enumerate() {
         let src = cell.source.text();
         let hits = search_text(disp.clone(), &src, matcher.clone(), 0, 0, multiline)?;
-        if !hits.is_empty() {
-            matched.push((i, hits));
-        }
+        if !hits.is_empty() { matched.push((i, hits)); }
         info.push((cell.id_string(i), cell.cell_type.clone().unwrap_or_default(), src));
     }
-    if matched.is_empty() {
-        return Ok(Vec::new());
-    }
+    if matched.is_empty() { return Ok(Vec::new()); }
     let mut emit: BTreeMap<usize, bool> = BTreeMap::new(); // index -> is_match
-    for (i, _) in &matched {
-        emit.insert(*i, true);
-    }
+    for (i, _) in &matched { emit.insert(*i, true); }
     if cell_context > 0 {
-        for (i, _) in &matched {
-            for j in i.saturating_sub(cell_context)..(i + cell_context + 1).min(n) {
-                emit.entry(j).or_insert(false);
-            }
-        }
+        for (i, _) in &matched { for j in i.saturating_sub(cell_context)..(i + cell_context + 1).min(n) { emit.entry(j).or_insert(false); } }
     }
     let mut matched: HashMap<usize, Vec<SearchLine>> = matched.into_iter().collect();
     let mut out = Vec::with_capacity(emit.len());
@@ -139,9 +111,7 @@ fn compile_nb_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: boo
     compile_regex(pattern, case_sensitive, smart_case, multiline).map_err(|e| {
         if !multiline && e.to_string().contains("not allowed in a regex") {
             RgApiError::new(format!("{e}; pass multiline=True to let the pattern match across lines within a cell"))
-        } else {
-            e
-        }
+        } else { e }
     })
 }
 
@@ -155,10 +125,7 @@ pub fn nb_search_file(
     multiline: bool,
 ) -> Result<Vec<NbCell>, RgApiError> {
     let matcher = compile_nb_regex(pattern, case_sensitive, smart_case, multiline)?;
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return Ok(Vec::new()),
-    };
+    let bytes = match std::fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
     process_file(display_path, &bytes, &matcher, cell_context, multiline)
 }
 
@@ -171,25 +138,13 @@ fn nb_entry(
     multiline: bool,
     max_depth: Option<usize>,
 ) -> Result<Vec<NbCell>, RgApiError> {
-    let dent = match entry {
-        Ok(dent) => dent,
-        Err(err) => return entry_err(err, max_depth).map_or(Ok(Vec::new()), Err),
-    };
+    let dent = match entry { Ok(dent) => dent, Err(err) => return entry_err(err, max_depth).map_or(Ok(Vec::new()), Err) };
     let path = dent.path();
-    let Some(ft) = dent.file_type() else {
-        return Ok(Vec::new());
-    };
-    if !ft.is_file() {
-        return Ok(Vec::new());
-    }
+    let Some(ft) = dent.file_type() else { return Ok(Vec::new()); };
+    if !ft.is_file() { return Ok(Vec::new()); }
     let rel = rel_path(root, path);
-    if !filters.path_allowed(&rel) {
-        return Ok(Vec::new());
-    }
-    let bytes = match std::fs::read(path) {
-        Ok(b) => b,
-        Err(_) => return Ok(Vec::new()),
-    };
+    if !filters.path_allowed(&rel) { return Ok(Vec::new()); }
+    let bytes = match std::fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
     process_file(rel, &bytes, matcher, cell_context, multiline)
 }
 
@@ -223,11 +178,7 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
         filters,
         move |dent, root, filters, tx, cancel| match nb_entry(dent, root, filters, &matcher, cell_context, multiline, max_depth) {
             Ok(cells) => {
-                for cell in cells {
-                    if cancel.load(Ordering::Relaxed) || tx.send(Ok(cell)).is_err() {
-                        return WalkState::Quit;
-                    }
-                }
+                for cell in cells { if cancel.load(Ordering::Relaxed) || tx.send(Ok(cell)).is_err() { return WalkState::Quit; } }
                 WalkState::Continue
             }
             Err(err) => {
@@ -238,6 +189,4 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
     ))
 }
 
-pub fn nb_search(opts: &NbOptions) -> Result<Vec<NbCell>, RgApiError> {
-    nb_iter(opts)?.collect()
-}
+pub fn nb_search(opts: &NbOptions) -> Result<Vec<NbCell>, RgApiError> { nb_iter(opts)?.collect() }

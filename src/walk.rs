@@ -59,9 +59,7 @@ impl Default for FindOptions {
     }
 }
 
-pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> {
-    find_iter(opts)?.collect()
-}
+pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> { find_iter(opts)?.collect() }
 
 pub type FindIter = StreamIter<String>;
 
@@ -90,14 +88,10 @@ pub fn find_iter(opts: &FindOptions) -> Result<FindIter, RgApiError> {
         opts.same_file_system,
         filters,
         move |dent, root, filters, tx, cancel| {
-            if panic_probe {
-                panic!("rgapi: deliberate panic for tests (panic_probe)");
-            }
+            if panic_probe { panic!("rgapi: deliberate panic for tests (panic_probe)"); }
             match find_entry(dent, root, filters, pattern.as_ref(), files, dirs, max_depth) {
                 Ok(Some(path)) => {
-                    if cancel.load(Ordering::Relaxed) || tx.send(Ok(path)).is_err() {
-                        return WalkState::Quit;
-                    }
+                    if cancel.load(Ordering::Relaxed) || tx.send(Ok(path)).is_err() { return WalkState::Quit; }
                     WalkState::Continue
                 }
                 Ok(None) => WalkState::Continue,
@@ -110,37 +104,23 @@ pub fn find_iter(opts: &FindOptions) -> Result<FindIter, RgApiError> {
     ))
 }
 
-pub struct StreamIter<T> {
-    rx: mpsc::Receiver<Result<T, RgApiError>>,
-    cancel: Arc<AtomicBool>,
-    _worker: std::thread::JoinHandle<()>,
-}
+pub struct StreamIter<T> { rx: mpsc::Receiver<Result<T, RgApiError>>, cancel: Arc<AtomicBool>, _worker: std::thread::JoinHandle<()> }
 
 impl<T> StreamIter<T> {
-    pub fn cancel(&self) {
-        self.cancel.store(true, Ordering::Relaxed);
-    }
+    pub fn cancel(&self) { self.cancel.store(true, Ordering::Relaxed); }
 
-    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
-        self.cancel.clone()
-    }
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> { self.cancel.clone() }
 
-    pub fn next_timeout(&mut self, timeout: std::time::Duration) -> Result<Result<T, RgApiError>, mpsc::RecvTimeoutError> {
-        self.rx.recv_timeout(timeout)
-    }
+    pub fn next_timeout(&mut self, timeout: std::time::Duration) -> Result<Result<T, RgApiError>, mpsc::RecvTimeoutError> { self.rx.recv_timeout(timeout) }
 
     /// Collect all items, stopping at `timeout_ms`; the bool is true when the deadline stopped it.
     pub fn collect_timeout(mut self, timeout_ms: Option<u64>) -> Result<(Vec<T>, bool), RgApiError> {
-        let Some(ms) = timeout_ms else {
-            return Ok((self.collect::<Result<Vec<_>, _>>()?, false));
-        };
+        let Some(ms) = timeout_ms else { return Ok((self.collect::<Result<Vec<_>, _>>()?, false)); };
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ms);
         let mut res = Vec::new();
         loop {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
-            if left.is_zero() {
-                return Ok((res, true));
-            }
+            if left.is_zero() { return Ok((res, true)); }
             match self.next_timeout(left) {
                 Ok(Ok(item)) => res.push(item),
                 Ok(Err(err)) => return Err(err),
@@ -153,16 +133,10 @@ impl<T> StreamIter<T> {
 
 impl<T> Iterator for StreamIter<T> {
     type Item = Result<T, RgApiError>;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.rx.recv().ok()
-    }
+    fn next(&mut self) -> Option<Self::Item> { self.rx.recv().ok() }
 }
 
-impl<T> Drop for StreamIter<T> {
-    fn drop(&mut self) {
-        self.cancel();
-    }
-}
+impl<T> Drop for StreamIter<T> { fn drop(&mut self) { self.cancel(); } }
 
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_walk<T, F>(
@@ -199,9 +173,7 @@ where
             let cancel = worker_cancel.clone();
             let entry = entry.clone();
             Box::new(move |dent| {
-                if cancel.load(Ordering::Relaxed) {
-                    return WalkState::Quit;
-                }
+                if cancel.load(Ordering::Relaxed) { return WalkState::Quit; }
                 catch_unwind(AssertUnwindSafe(|| entry(dent, &root, &filters, &tx, &cancel))).unwrap_or_else(|_| {
                     let _ = tx.send(Err(RgApiError::new("internal error during search (this is a bug, please report it)")));
                     WalkState::Quit
@@ -221,45 +193,26 @@ fn find_entry(
     dirs: bool,
     max_depth: Option<usize>,
 ) -> Result<Option<String>, RgApiError> {
-    let dent = match entry {
-        Ok(dent) => dent,
-        Err(err) => return entry_err(err, max_depth).map_or(Ok(None), Err),
-    };
+    let dent = match entry { Ok(dent) => dent, Err(err) => return entry_err(err, max_depth).map_or(Ok(None), Err) };
     let path = dent.path();
-    let Some(ft) = dent.file_type() else {
-        return Ok(None);
-    };
-    if path == root && ft.is_dir() {
-        return Ok(None);
-    }
-    if ft.is_file() && !files {
-        return Ok(None);
-    }
-    if ft.is_dir() && !dirs {
-        return Ok(None);
-    }
-    if !ft.is_file() && !ft.is_dir() && !ft.is_symlink() {
-        return Ok(None);
-    }
+    let Some(ft) = dent.file_type() else { return Ok(None); };
+    if path == root && ft.is_dir() { return Ok(None); }
+    if ft.is_file() && !files { return Ok(None); }
+    if ft.is_dir() && !dirs { return Ok(None); }
+    if !ft.is_file() && !ft.is_dir() && !ft.is_symlink() { return Ok(None); }
     let rel = rel_path(root, path);
     if let Some(pattern) = pattern {
         let name = dent.file_name().to_string_lossy();
-        if !re_match(pattern, &name) {
-            return Ok(None);
-        }
+        if !re_match(pattern, &name) { return Ok(None); }
     }
-    if !filters.path_allowed(&rel) {
-        return Ok(None);
-    }
+    if !filters.path_allowed(&rel) { return Ok(None); }
     Ok(Some(rel))
 }
 
 // An explicitly named file is always searched, like `rg FILE`: for a file root,
 // disable ignore rules and include hidden. Nothing is traversed below a file, so
 // the flags affect only the root itself.
-pub(crate) fn file_root_flags(root: &Path, ignore: bool, hidden: bool) -> (bool, bool) {
-    if root.is_file() { (false, true) } else { (ignore, hidden) }
-}
+pub(crate) fn file_root_flags(root: &Path, ignore: bool, hidden: bool) -> (bool, bool) { if root.is_file() { (false, true) } else { (ignore, hidden) } }
 
 // At the max_depth cap the walker opens directories it will never descend into
 // (readdir precedes the depth check in `ignore`), so permission failures there are
@@ -294,9 +247,7 @@ pub(crate) fn configure_walker(
     same_file_system: bool,
 ) {
     walker.standard_filters(ignore);
-    if ignore {
-        walker.add_custom_ignore_filename(".rgignore");
-    }
+    if ignore { walker.add_custom_ignore_filename(".rgignore"); }
     walker.hidden(!hidden);
     walker.require_git(false);
     walker.max_depth(max_depth);
@@ -346,72 +297,46 @@ impl PathFilters {
         let path = Path::new(rel);
         if let Some(excludes) = &self.excludes
             && excludes.is_match(path)
-        {
-            return false;
-        }
+        { return false; }
         if let Some(skip_path_re) = &self.skip_path_re
             && re_match(skip_path_re, rel)
-        {
-            return false;
-        }
+        { return false; }
         if let Some(path_re) = &self.path_re
             && !re_match(path_re, rel)
-        {
-            return false;
-        }
+        { return false; }
         if let Some(exts) = &self.exts
             && !exts.is_match(path)
-        {
-            return false;
-        }
-        if let Some(includes) = &self.includes {
-            return includes.is_match(path);
-        }
+        { return false; }
+        if let Some(includes) = &self.includes { return includes.is_match(path); }
         true
     }
 
     fn entry_allowed(&self, root: &Path, dent: &DirEntry) -> bool {
         let path = dent.path();
-        if path == root {
-            return true;
-        }
-        let Some(ft) = dent.file_type() else {
-            return true;
-        };
-        if !ft.is_dir() {
-            return true;
-        }
+        if path == root { return true; }
+        let Some(ft) = dent.file_type() else { return true; };
+        if !ft.is_dir() { return true; }
         let rel = rel_path(root, path);
         if let Some(skip_dirs) = &self.skip_dirs
             && skip_dirs.is_match(Path::new(&rel))
-        {
-            return false;
-        }
+        { return false; }
         if let Some(skip_dir_re) = &self.skip_dir_re
             && re_match(skip_dir_re, &rel)
-        {
-            return false;
-        }
+        { return false; }
         true
     }
 }
 
 pub(crate) fn build_globs(globs: &[String]) -> Result<Option<GlobSet>, RgApiError> {
-    if globs.is_empty() {
-        return Ok(None);
-    }
+    if globs.is_empty() { return Ok(None); }
     let mut builder = GlobSetBuilder::new();
-    for glob in globs {
-        add_glob(&mut builder, glob)?;
-    }
+    for glob in globs { add_glob(&mut builder, glob)?; }
     Ok(Some(builder.build().map_err(|e| RgApiError::new(e.to_string()))?))
 }
 
 fn add_glob(builder: &mut GlobSetBuilder, glob: &str) -> Result<(), RgApiError> {
     builder.add(Glob::new(glob).map_err(|e| RgApiError::new(e.to_string()))?);
-    if !glob.contains('/') && !glob.contains('\\') {
-        builder.add(Glob::new(&format!("**/{glob}")).map_err(|e| RgApiError::new(e.to_string()))?);
-    }
+    if !glob.contains('/') && !glob.contains('\\') { builder.add(Glob::new(&format!("**/{glob}")).map_err(|e| RgApiError::new(e.to_string()))?); }
     Ok(())
 }
 
@@ -425,9 +350,7 @@ fn build_path_re(pattern: Option<&str>) -> Result<Option<RegexMatcher>, RgApiErr
     pattern.map(|pattern| RegexMatcherBuilder::new().build(pattern).map_err(|e| RgApiError::new(e.to_string()))).transpose()
 }
 
-fn re_match(matcher: &RegexMatcher, rel: &str) -> bool {
-    matcher.is_match(rel.as_bytes()).unwrap_or(false)
-}
+fn re_match(matcher: &RegexMatcher, rel: &str) -> bool { matcher.is_match(rel.as_bytes()).unwrap_or(false) }
 
 #[cfg(test)]
 mod tests {
@@ -439,9 +362,7 @@ mod tests {
         let worker = std::thread::spawn(move || {
             for i in items {
                 std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                if tx.send(Ok(i)).is_err() {
-                    return;
-                }
+                if tx.send(Ok(i)).is_err() { return; }
             }
         });
         StreamIter { rx, cancel, _worker: worker }

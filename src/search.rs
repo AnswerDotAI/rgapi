@@ -14,10 +14,7 @@ use crate::RgApiError;
 use crate::walk::{PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MatchSpan {
-    pub start: usize,
-    pub end: usize,
-}
+pub struct MatchSpan { pub start: usize, pub end: usize }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchKind {
     Match,
@@ -26,14 +23,7 @@ pub enum SearchKind {
     Context,
 }
 impl SearchKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Match => "match",
-            Self::Before => "before",
-            Self::After => "after",
-            Self::Context => "context",
-        }
-    }
+    pub fn as_str(self) -> &'static str { match self { Self::Match => "match", Self::Before => "before", Self::After => "after", Self::Context => "context" } }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,9 +89,7 @@ impl Default for RgOptions {
     }
 }
 
-pub fn rg(opts: &RgOptions) -> Result<Vec<SearchLine>, RgApiError> {
-    rg_iter(opts)?.collect()
-}
+pub fn rg(opts: &RgOptions) -> Result<Vec<SearchLine>, RgApiError> { rg_iter(opts)?.collect() }
 
 pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
     let (ignore, hidden) = file_root_flags(&opts.root, opts.ignore, opts.hidden);
@@ -128,9 +116,7 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
         opts.same_file_system,
         filters,
         move |dent, root, filters, tx, cancel| {
-            if panic_probe {
-                panic!("rgapi: deliberate panic for tests (panic_probe)");
-            }
+            if panic_probe { panic!("rgapi: deliberate panic for tests (panic_probe)"); }
             search_entry(dent, root, filters, &matcher, before_context, after_context, max_depth, tx, cancel)
         },
     ))
@@ -149,48 +135,29 @@ fn search_entry(
     tx: &SyncSender<Result<SearchLine, RgApiError>>,
     cancel: &Arc<AtomicBool>,
 ) -> WalkState {
-    if is_cancelled(cancel) {
-        return WalkState::Quit;
-    }
+    if is_cancelled(cancel) { return WalkState::Quit; }
     let dent = match entry {
         Ok(dent) => dent,
         Err(err) => {
-            return match entry_err(err, max_depth) {
-                Some(e) => send_search_error(tx, e),
-                None => WalkState::Continue,
-            };
+            return match entry_err(err, max_depth) { Some(e) => send_search_error(tx, e), None => WalkState::Continue };
         }
     };
     let path = dent.path();
-    let Some(ft) = dent.file_type() else {
-        return WalkState::Continue;
-    };
-    if !ft.is_file() {
-        return WalkState::Continue;
-    }
+    let Some(ft) = dent.file_type() else { return WalkState::Continue; };
+    if !ft.is_file() { return WalkState::Continue; }
     let rel = rel_path(root, path);
-    if !filters.path_allowed(&rel) {
-        return WalkState::Continue;
-    }
+    if !filters.path_allowed(&rel) { return WalkState::Continue; }
     match search_path_cancelable(path, rel, matcher.clone(), before_context, after_context, Some(cancel.clone())) {
         Ok(lines) => {
-            if is_cancelled(cancel) {
-                return WalkState::Quit;
-            }
-            for line in lines {
-                if is_cancelled(cancel) || tx.send(Ok(line)).is_err() {
-                    return WalkState::Quit;
-                }
-            }
+            if is_cancelled(cancel) { return WalkState::Quit; }
+            for line in lines { if is_cancelled(cancel) || tx.send(Ok(line)).is_err() { return WalkState::Quit; } }
             WalkState::Continue
         }
         Err(err) => send_search_error(tx, err),
     }
 }
 
-fn is_cancelled(cancel: &Arc<AtomicBool>) -> bool {
-    cancel.load(Ordering::Relaxed)
-}
+fn is_cancelled(cancel: &Arc<AtomicBool>) -> bool { cancel.load(Ordering::Relaxed) }
 
 fn send_search_error(tx: &SyncSender<Result<SearchLine, RgApiError>>, err: RgApiError) -> WalkState {
     let _ = tx.send(Err(err));
@@ -198,15 +165,10 @@ fn send_search_error(tx: &SyncSender<Result<SearchLine, RgApiError>>, err: RgApi
 }
 
 pub fn compile_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: bool, multiline: bool) -> Result<RegexMatcher, RgApiError> {
-    if pattern.is_empty() {
-        return Err(RgApiError::new("pattern may not be empty"));
-    }
+    if pattern.is_empty() { return Err(RgApiError::new("pattern may not be empty")); }
     let mut builder = RegexMatcherBuilder::new();
-    if multiline {
-        builder.multi_line(true);
-    } else {
-        builder.line_terminator(Some(b'\n'));
-    }
+    if multiline { builder.multi_line(true); }
+    else { builder.line_terminator(Some(b'\n')); }
     match case_sensitive {
         Some(true) => {
             builder.case_insensitive(false);
@@ -223,13 +185,9 @@ pub fn compile_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: bo
     builder.build(pattern).map_err(|e| RgApiError::new(e.to_string()))
 }
 
-fn line_hash_u16(line: &str) -> u16 {
-    (crc32fast::hash(line.as_bytes()) & 0xffff) as u16
-}
+fn line_hash_u16(line: &str) -> u16 { (crc32fast::hash(line.as_bytes()) & 0xffff) as u16 }
 
-pub(crate) fn format_lnhash(lineno: u64, line: &str) -> String {
-    format!("{}|{:04x}|", lineno, line_hash_u16(line))
-}
+pub(crate) fn format_lnhash(lineno: u64, line: &str) -> String { format!("{}|{:04x}|", lineno, line_hash_u16(line)) }
 
 pub fn search_path(
     path: &Path,
@@ -237,9 +195,7 @@ pub fn search_path(
     matcher: RegexMatcher,
     before_context: usize,
     after_context: usize,
-) -> Result<Vec<SearchLine>, RgApiError> {
-    search_path_cancelable(path, display_path, matcher, before_context, after_context, None)
-}
+) -> Result<Vec<SearchLine>, RgApiError> { search_path_cancelable(path, display_path, matcher, before_context, after_context, None) }
 
 fn search_path_cancelable(
     path: &Path,
@@ -268,9 +224,7 @@ pub fn search_text(
     before_context: usize,
     after_context: usize,
     multiline: bool,
-) -> Result<Vec<SearchLine>, RgApiError> {
-    search_bytes(display_path, text.as_bytes(), matcher, before_context, after_context, multiline)
-}
+) -> Result<Vec<SearchLine>, RgApiError> { search_bytes(display_path, text.as_bytes(), matcher, before_context, after_context, multiline) }
 fn search_bytes(
     display_path: String,
     bytes: &[u8],
@@ -295,22 +249,13 @@ struct CollectSink<'a> {
     lines: &'a mut Vec<SearchLine>,
     cancel: Option<Arc<AtomicBool>>,
 }
-impl CollectSink<'_> {
-    fn cancelled(&self) -> bool {
-        match &self.cancel {
-            Some(cancel) => is_cancelled(cancel),
-            None => false,
-        }
-    }
-}
+impl CollectSink<'_> { fn cancelled(&self) -> bool { match &self.cancel { Some(cancel) => is_cancelled(cancel), None => false } } }
 
 impl Sink for CollectSink<'_> {
     type Error = SearchError;
 
     fn matched(&mut self, _searcher: &grep_searcher::Searcher, mat: &SinkMatch<'_>) -> Result<bool, Self::Error> {
-        if self.cancelled() {
-            return Ok(false);
-        }
+        if self.cancelled() { return Ok(false); }
         let line = bytes_to_line(mat.bytes())?;
         let line_number = mat.line_number().unwrap_or(0);
         let spans = spans_for(&self.matcher, mat.bytes())?;
@@ -326,9 +271,7 @@ impl Sink for CollectSink<'_> {
     }
 
     fn context(&mut self, _searcher: &grep_searcher::Searcher, ctx: &SinkContext<'_>) -> Result<bool, Self::Error> {
-        if self.cancelled() {
-            return Ok(false);
-        }
+        if self.cancelled() { return Ok(false); }
         let kind = match ctx.kind() {
             SinkContextKind::Before => SearchKind::Before,
             SinkContextKind::After => SearchKind::After,
@@ -346,24 +289,14 @@ impl Sink for CollectSink<'_> {
 }
 
 #[derive(Debug)]
-pub(crate) enum SearchError {
-    Message(String),
-    InvalidUtf8,
-}
+pub(crate) enum SearchError { Message(String), InvalidUtf8 }
 impl std::fmt::Display for SearchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Message(msg) => write!(f, "{msg}"),
-            Self::InvalidUtf8 => write!(f, "invalid utf-8"),
-        }
+        match self { Self::Message(msg) => write!(f, "{msg}"), Self::InvalidUtf8 => write!(f, "invalid utf-8") }
     }
 }
 impl std::error::Error for SearchError {}
-impl SinkError for SearchError {
-    fn error_message<T: std::fmt::Display>(message: T) -> Self {
-        Self::Message(message.to_string())
-    }
-}
+impl SinkError for SearchError { fn error_message<T: std::fmt::Display>(message: T) -> Self { Self::Message(message.to_string()) } }
 fn bytes_to_line(bytes: &[u8]) -> Result<String, SearchError> {
     let s = std::str::from_utf8(bytes).map_err(|_| SearchError::InvalidUtf8)?;
     Ok(s.trim_end_matches(['\r', '\n']).to_string())

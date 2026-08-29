@@ -1,3 +1,4 @@
 max_width = 160
 use_small_heuristics = "Max"
 use_field_init_shorthand = true
+disable_all_formatting = true

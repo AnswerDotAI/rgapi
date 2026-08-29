@@ -23,11 +23,7 @@ pub struct SearchBlock {
     pub matches: Vec<SearchLine>,
 }
 
-struct BlockInfo {
-    start_line: u64,
-    end_line: u64,
-    source: String,
-}
+struct BlockInfo { start_line: u64, end_line: u64, source: String }
 
 fn split_blocks(text: &str) -> Vec<BlockInfo> {
     let mut blocks = Vec::new();
@@ -41,31 +37,20 @@ fn split_blocks(text: &str) -> Vec<BlockInfo> {
                 lines.clear();
             }
         } else {
-            if start.is_none() {
-                start = Some(line_no);
-            }
+            if start.is_none() { start = Some(line_no); }
             lines.push(line);
         }
     }
-    if let Some(first) = start {
-        blocks.push(BlockInfo { start_line: first, end_line: text.lines().count() as u64, source: lines.join("\n") });
-    }
+    if let Some(first) = start { blocks.push(BlockInfo { start_line: first, end_line: text.lines().count() as u64, source: lines.join("\n") }); }
     blocks
 }
 
 fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, before_context: usize, after_context: usize) -> Result<Vec<SearchBlock>, RgApiError> {
-    if bytes.contains(&0) {
-        return Ok(Vec::new());
-    }
-    let text = match std::str::from_utf8(bytes) {
-        Ok(text) => text,
-        Err(_) => return Ok(Vec::new()),
-    };
+    if bytes.contains(&0) { return Ok(Vec::new()); }
+    let text = match std::str::from_utf8(bytes) { Ok(text) => text, Err(_) => return Ok(Vec::new()) };
     let blocks = split_blocks(text);
     let hits = search_text(disp.clone(), text, matcher.clone(), 0, 0, false)?;
-    if hits.is_empty() {
-        return Ok(Vec::new());
-    }
+    if hits.is_empty() { return Ok(Vec::new()); }
     let mut matched: HashMap<usize, Vec<SearchLine>> = HashMap::new();
     for hit in hits {
         if let Some((i, _)) = blocks.iter().enumerate().find(|(_, b)| b.start_line <= hit.line_number && hit.line_number <= b.end_line) {
@@ -77,9 +62,7 @@ fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, before_conte
         emit.insert(*i, true);
         let start = i.saturating_sub(before_context);
         let end = (i + after_context + 1).min(blocks.len());
-        for j in start..end {
-            emit.entry(j).or_insert(false);
-        }
+        for j in start..end { emit.entry(j).or_insert(false); }
     }
     Ok(emit
         .into_iter()
@@ -109,25 +92,13 @@ fn block_entry(
     after_context: usize,
     max_depth: Option<usize>,
 ) -> Result<Vec<SearchBlock>, RgApiError> {
-    let dent = match entry {
-        Ok(dent) => dent,
-        Err(err) => return entry_err(err, max_depth).map_or(Ok(Vec::new()), Err),
-    };
+    let dent = match entry { Ok(dent) => dent, Err(err) => return entry_err(err, max_depth).map_or(Ok(Vec::new()), Err) };
     let path = dent.path();
-    let Some(ft) = dent.file_type() else {
-        return Ok(Vec::new());
-    };
-    if !ft.is_file() {
-        return Ok(Vec::new());
-    }
+    let Some(ft) = dent.file_type() else { return Ok(Vec::new()); };
+    if !ft.is_file() { return Ok(Vec::new()); }
     let rel = rel_path(root, path);
-    if !filters.path_allowed(&rel) {
-        return Ok(Vec::new());
-    }
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(_) => return Ok(Vec::new()),
-    };
+    if !filters.path_allowed(&rel) { return Ok(Vec::new()); }
+    let bytes = match std::fs::read(path) { Ok(bytes) => bytes, Err(_) => return Ok(Vec::new()) };
     process_file(rel, &bytes, matcher, before_context, after_context)
 }
 
@@ -159,11 +130,7 @@ pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
         filters,
         move |dent, root, filters, tx, cancel| match block_entry(dent, root, filters, &matcher, before_context, after_context, max_depth) {
             Ok(blocks) => {
-                for block in blocks {
-                    if cancel.load(Ordering::Relaxed) || tx.send(Ok(block)).is_err() {
-                        return WalkState::Quit;
-                    }
-                }
+                for block in blocks { if cancel.load(Ordering::Relaxed) || tx.send(Ok(block)).is_err() { return WalkState::Quit; } }
                 WalkState::Continue
             }
             Err(err) => {

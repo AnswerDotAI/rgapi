@@ -48,9 +48,7 @@ impl PartialEq for SearchLinePy {
 const MAXLEN: usize = 180; // Most characters shown per displayed line
 
 fn preview(text: &str, width: usize) -> String {
-    if text.chars().count() <= width {
-        return text.to_string();
-    }
+    if text.chars().count() <= width { return text.to_string(); }
     format!("{}…", text.chars().take(width).collect::<String>())
 }
 
@@ -76,11 +74,7 @@ impl SearchLinePy {
     fn __str__(&self) -> String {
         let sep = if self.kind == "match" { ":" } else { "-" };
         let prefix = if self.path.is_empty() { String::new() } else { format!("{}{}", self.path, sep) };
-        if self.display_lnhash {
-            format!("{}{}{}", prefix, self.lnhash, preview(&self.line, MAXLEN))
-        } else {
-            format!("{}{}{}{}", prefix, self.line_number, sep, preview(&self.line, MAXLEN))
-        }
+        if self.display_lnhash { format!("{}{}{}", prefix, self.lnhash, preview(&self.line, MAXLEN)) } else { format!("{}{}{}{}", prefix, self.line_number, sep, preview(&self.line, MAXLEN)) }
     }
     fn _repr_pretty_(&self, p: &Bound<'_, PyAny>, cycle: bool) -> PyResult<()> {
         let text = if cycle { "...".to_string() } else { self.__str__() };
@@ -89,28 +83,17 @@ impl SearchLinePy {
     }
 }
 #[pyclass(name = "RgIter", unsendable)]
-struct RgIterPy {
-    inner: RgIter,
-    display_lnhash: bool,
-}
+struct RgIterPy { inner: RgIter, display_lnhash: bool }
 #[pymethods]
 impl RgIterPy {
-    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf
-    }
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> { slf }
     fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Option<SearchLinePy>> {
         let display_lnhash = slf.display_lnhash;
         Ok(next_stream_py(py, &mut slf.inner)?.map(|l| search_line_py(l, display_lnhash)))
     }
-    fn cancel(&self) {
-        self.inner.cancel();
-    }
-    fn __repr__(&self) -> String {
-        "RgIter(SearchLine stream)".to_string()
-    }
-    fn __str__(&self) -> String {
-        self.__repr__()
-    }
+    fn cancel(&self) { self.inner.cancel(); }
+    fn __repr__(&self) -> String { "RgIter(SearchLine stream)".to_string() }
+    fn __str__(&self) -> String { self.__repr__() }
     fn _repr_pretty_(&self, p: &Bound<'_, PyAny>, cycle: bool) -> PyResult<()> {
         let text = if cycle { "...".to_string() } else { self.__str__() };
         p.call_method1("text", (text,))?;
@@ -178,12 +161,8 @@ struct RegexPy {
 impl RegexPy {
     #[new]
     #[pyo3(signature = (pattern, case_sensitive=None, smart_case=false))]
-    fn new(pattern: String, case_sensitive: Option<bool>, smart_case: bool) -> PyResult<Self> {
-        compile_regex_py(pattern, case_sensitive, smart_case)
-    }
-    fn is_match(&self, text: &str) -> PyResult<bool> {
-        self.matcher.is_match(text.as_bytes()).map_err(|e| PyValueError::new_err(e.to_string()))
-    }
+    fn new(pattern: String, case_sensitive: Option<bool>, smart_case: bool) -> PyResult<Self> { compile_regex_py(pattern, case_sensitive, smart_case) }
+    fn is_match(&self, text: &str) -> PyResult<bool> { self.matcher.is_match(text.as_bytes()).map_err(|e| PyValueError::new_err(e.to_string())) }
     fn finditer(&self, text: &str) -> PyResult<Vec<(usize, usize)>> {
         spans_for(&self.matcher, text.as_bytes())
             .map(|spans| spans.into_iter().map(|m| (m.start, m.end)).collect())
@@ -195,14 +174,10 @@ impl RegexPy {
             let value = if case_sensitive { "True" } else { "False" };
             args.push(format!("case_sensitive={value}"));
         }
-        if self.smart_case {
-            args.push("smart_case=True".to_string());
-        }
+        if self.smart_case { args.push("smart_case=True".to_string()); }
         format!("Regex({})", args.join(", "))
     }
-    fn __str__(&self) -> String {
-        self.__repr__()
-    }
+    fn __str__(&self) -> String { self.__repr__() }
     fn _repr_pretty_(&self, p: &Bound<'_, PyAny>, cycle: bool) -> PyResult<()> {
         let text = if cycle { "...".to_string() } else { self.__str__() };
         p.call_method1("text", (text,))?;
@@ -215,9 +190,7 @@ fn compile_regex_py(pattern: String, case_sensitive: Option<bool>, smart_case: b
 }
 #[pyfunction(name = "compile")]
 #[pyo3(signature = (pattern, case_sensitive=None, smart_case=false))]
-fn compile_py(pattern: String, case_sensitive: Option<bool>, smart_case: bool) -> PyResult<RegexPy> {
-    compile_regex_py(pattern, case_sensitive, smart_case)
-}
+fn compile_py(pattern: String, case_sensitive: Option<bool>, smart_case: bool) -> PyResult<RegexPy> { compile_regex_py(pattern, case_sensitive, smart_case) }
 fn find_opts(
     root: &str,
     pattern: Option<String>,
@@ -578,23 +551,13 @@ fn rg_iter_py(
 }
 
 #[pyclass(name = "FindIter", unsendable)]
-struct FindIterPy {
-    inner: FindIter,
-}
+struct FindIterPy { inner: FindIter }
 #[pymethods]
 impl FindIterPy {
-    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf
-    }
-    fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Option<String>> {
-        next_stream_py(py, &mut slf.inner)
-    }
-    fn cancel(&self) {
-        self.inner.cancel();
-    }
-    fn __repr__(&self) -> String {
-        "FindIter(path stream)".to_string()
-    }
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> { slf }
+    fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Option<String>> { next_stream_py(py, &mut slf.inner) }
+    fn cancel(&self) { self.inner.cancel(); }
+    fn __repr__(&self) -> String { "FindIter(path stream)".to_string() }
 }
 
 #[pyfunction(name = "find_iter")]
@@ -643,16 +606,10 @@ fn find_iter_py(
 }
 
 #[pyclass(name = "AsyncHandle")]
-struct AsyncHandlePy {
-    cancel: Arc<AtomicBool>,
-}
+struct AsyncHandlePy { cancel: Arc<AtomicBool> }
 
 #[pymethods]
-impl AsyncHandlePy {
-    fn cancel(&self) {
-        self.cancel.store(true, Ordering::Relaxed);
-    }
-}
+impl AsyncHandlePy { fn cancel(&self) { self.cancel.store(true, Ordering::Relaxed); } }
 
 #[pyfunction(name = "find_async")]
 #[pyo3(signature = (cb, root=".", pattern=None, include=None, exclude=None, exts=None, hidden=false, ignore=true, max_depth=None, min_depth=None, max_filesize=None, follow_links=false, same_file_system=false, path_re=None, skip_path_re=None, skip_dir=None, skip_dir_re=None, files=true, dirs=false, timeout_ms=None))]
@@ -756,9 +713,7 @@ fn drain_stream<T>(iter: &mut StreamIter<T>, flag: &Arc<AtomicBool>, deadline: O
     let mut rows = Vec::new();
     let (mut timed_out, mut err) = (false, None);
     loop {
-        if flag.load(Ordering::Relaxed) {
-            break;
-        }
+        if flag.load(Ordering::Relaxed) { break; }
         let mut wait = Duration::from_millis(50);
         if let Some(d) = deadline {
             let left = d.saturating_duration_since(Instant::now());
@@ -816,9 +771,7 @@ where
     std::thread::spawn(move || {
         let mut err: Option<String> = None;
         loop {
-            if flag.load(Ordering::Relaxed) {
-                break;
-            }
+            if flag.load(Ordering::Relaxed) { break; }
             let first = match iter.next_timeout(Duration::from_millis(50)) {
                 Ok(Ok(line)) => line,
                 Ok(Err(e)) => {
@@ -839,19 +792,12 @@ where
                     Err(_) => break,
                 }
             }
-            let failed = Python::attach(|py| match conv(py, batch) {
-                Ok(res) => cb.call1(py, (res, None::<String>)).is_err(),
-                Err(_) => true,
-            });
-            if failed || err.is_some() {
-                break;
-            }
+            let failed = Python::attach(|py| match conv(py, batch) { Ok(res) => cb.call1(py, (res, None::<String>)).is_err(), Err(_) => true });
+            if failed || err.is_some() { break; }
         }
         iter.cancel();
         drop(iter);
-        Python::attach(|py| {
-            let _ = cb.call1(py, (py.None(), err));
-        });
+        Python::attach(|py| { let _ = cb.call1(py, (py.None(), err)); });
     });
     AsyncHandlePy { cancel }
 }
@@ -1035,7 +981,8 @@ fn panic_probe_py(py: Python<'_>, root: &str, walk: bool) -> PyResult<()> {
     if walk {
         let opts = FindOptions { root, panic_probe: true, ..FindOptions::default() };
         find(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
-    } else {
+    }
+    else {
         let opts = RgOptions { root, pattern: "panic_probe".to_string(), panic_probe: true, ..RgOptions::default() };
         let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
         collect_stream_py(py, iter, |l| search_line_py(l, false), None)?;
@@ -1113,23 +1060,13 @@ fn nb_opts(
 }
 
 #[pyclass(name = "NbIter", unsendable)]
-struct NbIterPy {
-    inner: NbIter,
-}
+struct NbIterPy { inner: NbIter }
 #[pymethods]
 impl NbIterPy {
-    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf
-    }
-    fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Option<NbRow>> {
-        Ok(next_stream_py(py, &mut slf.inner)?.map(nb_row))
-    }
-    fn cancel(&self) {
-        self.inner.cancel();
-    }
-    fn __repr__(&self) -> String {
-        "NbIter(NbCell stream)".to_string()
-    }
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> { slf }
+    fn __next__(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<Option<NbRow>> { Ok(next_stream_py(py, &mut slf.inner)?.map(nb_row)) }
+    fn cancel(&self) { self.inner.cancel(); }
+    fn __repr__(&self) -> String { "NbIter(NbCell stream)".to_string() }
 }
 
 #[pyfunction(name = "nb_search")]
@@ -1378,9 +1315,7 @@ impl From<SearchLine> for SearchLinePy {
     }
 }
 
-fn search_line_py(line: SearchLine, display_lnhash: bool) -> SearchLinePy {
-    SearchLinePy { display_lnhash, ..SearchLinePy::from(line) }
-}
+fn search_line_py(line: SearchLine, display_lnhash: bool) -> SearchLinePy { SearchLinePy { display_lnhash, ..SearchLinePy::from(line) } }
 
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
