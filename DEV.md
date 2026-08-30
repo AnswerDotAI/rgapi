@@ -9,7 +9,7 @@ src/walk.rs       ignore/globset/grep-regex-backed path walking and filtering
 src/search.rs     grep-regex/grep-searcher-backed searching
 src/block.rs      blank-line-delimited block grouping, matching, and block context
 src/python.rs     PyO3 classes and private core functions
-python/rgapi/     public Python wrappers over `rgapi._core`
+python/rgapi/     public Python wrappers over `rgapi._core`, plus the `rgapi-nbrg` CLI
 tests/            pytest coverage for the Python API
 ```
 
