@@ -133,6 +133,16 @@ matches      list of SearchLine rows for the matched lines within the cell
 
 Notebook walking, parsing, and matching all happen in parallel in Rust, in the same pass as the file walk. Parsing uses a lean model that reads only each cell's `id`, `cell_type`, and `source` and skips outputs and metadata, so large embedded outputs (images, plots) are never materialized. `search_nb(pattern, path, ...)` searches a single notebook file the same way.
 
+`rgapi-nbrg` exposes notebook search without requiring a Python kernel:
+
+```bash
+rgapi-nbrg 'read_csv' .
+rgapi-nbrg 'read_csv' . --cell-context 1
+rgapi-nbrg 'read_csv' nbs --glob '*.ipynb' --max-results 20
+```
+
+Run `rgapi-nbrg --help` for its discovery, matching, and output options.
+
 ## Async
 
 `fda`, `rga`, and `nbrga` are awaitable twins of `fd`, `rg`, and `nbrg`, and `fda_iter`, `rga_iter` and `nbrga_iter` are async generators that yield rows as the search finds them. All take the same arguments and return the same types as their sync counterparts.

@@ -30,6 +30,9 @@ rgapi = "rgapi.skill"
 [project.entry-points.fastaudit_safe_native]
 rgapi = "rgapi"
 
+[project.scripts]
+rgapi-nbrg = "rgapi._cli:nbrg_cli"
+
 [tool.maturin]
 features = ["extension-module"]
 python-source = "python"

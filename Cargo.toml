@@ -32,4 +32,18 @@ extension-module = ["python", "pyo3/extension-module"]
 too_many_arguments = "allow"
 
 [profile.release]
+lto = false
+codegen-units = 16
+
+[profile.release.package.rgapi]
+incremental = true
+
+[profile.dist]
+inherits = "release"
+lto = true
+incremental = false
+codegen-units = 1
 strip = true
+
+[profile.dist.package.rgapi]
+incremental = false
