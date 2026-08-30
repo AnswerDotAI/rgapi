@@ -34,7 +34,7 @@ Release flow is: release first, then bump - `ship-release` does both.
 2. Confirm the release version in `Cargo.toml` (`[package].version`).
 3. Run `ship-release`. It tags `v<version>`, pushes branch and tag (CI builds and publishes), then bumps `Cargo.toml`, refreshes the editable install, and pushes the bump without a tag.
 
-The GitHub workflow builds wheels for Python 3.10-3.13 on Linux and macOS and publishes artifacts to GitHub Releases and PyPI when a `v*` tag is pushed.
+The GitHub workflow builds wheels for Python 3.10-3.13 on Linux and macOS and publishes the Rust crate, GitHub release artifacts, and PyPI package when a `v*` tag is pushed.
 
 ## Design notes
 
