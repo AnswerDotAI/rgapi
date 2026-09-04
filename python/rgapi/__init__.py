@@ -423,13 +423,13 @@ async def rga_iter(
 
 def search_text(
     matcher:Regex, # Compiled `Regex` from `compile()`
-    text:str, # Text to search
+    text:str|bytes, # Text or immutable byte payload to search
     path:str|Path="<text>", # Path label stored in results
     before_context:int=0, # Lines of context before each match
     after_context:int=0, # Lines of context after each match
     context:int=0 # Sets both before and after context, like `rg -C`
 ) -> SearchResults:
-    "Search an in-memory string with a compiled matcher."
+    "Search in-memory text or an immutable byte payload with a compiled matcher."
     before_context, after_context = _context(context, before_context, after_context)
     return SearchResults(_core.search_text(matcher, text, _display_path(path), before_context, after_context))
 
@@ -437,12 +437,12 @@ def search_text(
 @delegates(search_text, but=['path'])
 def rgstr(
     pattern:str, # Regex pattern to search for
-    text:str, # Text to search
+    text:str|bytes, # Text or immutable byte payload to search
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     **kwargs
 ) -> SearchResults:
-    "Search text already in hand, like `rg` on a string: no path label, no separate `compile`."
+    "Search text or bytes already in hand: no path label and no separate `compile`."
     return search_text(compile(pattern, case_sensitive=case_sensitive, smart_case=smart_case), text, path="", **kwargs)
 
 

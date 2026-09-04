@@ -1,4 +1,4 @@
-import _thread, json, threading
+import _thread, concurrent.futures, json, threading
 
 import pytest
 
@@ -310,6 +310,67 @@ def test_rgstr():
         ("before", "", 1, "zero"), ("match", "", 2, "TODO here"), ("after", "", 3, "one")]
     assert str(res[1]) == "2:TODO here"
     assert str(res[0]) == "1-zero"
+
+
+def test_rgstr_bytes_payload():
+    payload = b'{"event":"start"}\n{"token":"abc123"}\n{"event":"end"}\n'
+    res = rgstr(r'"token"', payload, context=1)
+    assert [r.kind for r in res] == ["before", "match", "after"]
+    assert res[1].line == '{"token":"abc123"}'
+
+
+@pytest.mark.parametrize("payload", ['{"消息":"船舶位置正常"}\n', '{"消息":"船舶位置正常"}\n'.encode()])
+def test_rgstr_chinese_text_and_utf8_bytes(payload):
+    res = rgstr("船舶", payload)
+    assert len(res) == 1
+    assert res[0].line == '{"消息":"船舶位置正常"}'
+    start, end = res[0].matches[0]
+    assert res[0].line.encode()[start:end] == "船舶".encode()
+
+
+def test_rgstr_rejects_mutable_and_invalid_payloads():
+    with pytest.raises(TypeError, match="str or bytes"):
+        rgstr("token", bytearray(b"token"))
+    assert rgstr("token", b"\xff\ntoken\n")[0].line == "token"
+    with pytest.raises(ValueError, match="UTF-8|utf-8"):
+        rgstr(r"(?-u:\xFF)", b"\xff\n")
+    with pytest.raises(UnicodeEncodeError):
+        rgstr(".", "\ud800")
+
+
+def test_rgstr_shared_bytes_payload_from_threads():
+    workers = 8
+    barrier = threading.Barrier(workers)
+    payload = b'{"event":"noop"}\n' * 65536 + b'{"token":"abc123"}\n'
+
+    def search(_):
+        barrier.wait(timeout=10)
+        rows = rgstr("abc[0-9]+", payload)
+        return threading.get_ident(), rows[0].line, rows[0].matches
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(search, range(workers)))
+    assert len({thread_id for thread_id, _, _ in results}) == workers
+    assert [(line, matches) for _, line, matches in results] == [
+        ('{"token":"abc123"}', [(10, 16)])] * workers
+
+
+def test_search_text_shared_matcher_and_bytes_from_threads():
+    workers = 8
+    barrier = threading.Barrier(workers)
+    matcher = compile("abc[0-9]+")
+    payload = b'{"event":"noop"}\n' * 65536 + b'{"token":"abc123"}\n'
+
+    def search(_):
+        barrier.wait(timeout=10)
+        rows = search_text(matcher, payload)
+        return threading.get_ident(), rows[0].line, rows[0].matches
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(search, range(workers)))
+    assert len({thread_id for thread_id, _, _ in results}) == workers
+    assert [(line, matches) for _, line, matches in results] == [
+        ('{"token":"abc123"}', [(10, 16)])] * workers
 
 
 def write_nb(path, cells):

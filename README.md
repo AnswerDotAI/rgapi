@@ -48,6 +48,19 @@ search_text(matcher, "alpha\nTODO\nomega\n", path="memory.txt", context=1)
 search_path(matcher, "src/lib.rs", display_path="src/lib.rs")
 ```
 
+`search_text` and `rgstr` also accept immutable `bytes`, so an HTTP request body
+can be searched without decoding it in Python first:
+
+```python
+body = await request.body()
+rows = rgstr(r'"token"\s*:', body, context=1)
+```
+
+The search itself operates directly on bytes. Returned match and context lines
+must be valid UTF-8 or `ValueError` is raised because `SearchLine.line` is text;
+invalid bytes elsewhere in the payload are allowed. Mutable `bytearray` and
+`memoryview` inputs are not accepted.
+
 ## Install
 
 ```bash

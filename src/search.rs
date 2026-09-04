@@ -225,7 +225,7 @@ pub fn search_text(
     after_context: usize,
     multiline: bool,
 ) -> Result<Vec<SearchLine>, RgApiError> { search_bytes(display_path, text.as_bytes(), matcher, before_context, after_context, multiline) }
-fn search_bytes(
+pub(crate) fn search_bytes(
     display_path: String,
     bytes: &[u8],
     matcher: RegexMatcher,

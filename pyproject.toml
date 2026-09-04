@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
+requires = ["maturin>=1.15.0,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -17,7 +17,7 @@ classifiers = [
 dependencies = ["fastcore>=1.14.6"]
 
 [project.optional-dependencies]
-dev = ["fastship>=0.0.12", "maturin>=1.0,<2.0", "pytest"]
+dev = ["fastship>=0.0.12", "maturin>=1.15.0,<2.0", "pytest"]
 
 [project.urls]
 Homepage = "https://github.com/AnswerDotAI/rgapi"

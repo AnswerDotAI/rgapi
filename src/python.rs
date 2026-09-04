@@ -5,15 +5,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict};
+use pyo3::types::{PyAny, PyBytes, PyDict, PyString};
 
-use crate::search::spans_for;
+use crate::search::{search_bytes as search_bytes_core, spans_for};
 use crate::{
     FindIter, FindOptions, NbCell, NbIter, NbOptions, RgIter, RgOptions, SearchBlock, SearchLine, StreamIter, block_iter as block_iter_core, compile_regex,
     find, find_iter as find_iter_core, nb_iter as nb_iter_core, nb_search_file, rg_iter as rg_iter_core, search_path as search_path_core,
-    search_text as search_text_core,
 };
 use std::path::Path;
 
@@ -325,10 +325,44 @@ fn find_py(
     let iter = find_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     collect_stream_py(py, iter, |p| p, timeout_ms)
 }
+enum TextPayload {
+    Text(PyBackedStr),
+    Bytes(PyBackedBytes),
+}
+
+impl TextPayload {
+    fn extract(value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        if value.cast::<PyString>().is_ok() {
+            return Ok(Self::Text(value.extract()?));
+        }
+        if let Ok(bytes) = value.cast::<PyBytes>() {
+            return Ok(Self::Bytes(bytes.to_owned().into()));
+        }
+        Err(PyTypeError::new_err("text must be str or bytes"))
+    }
+
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::Text(text) => text.as_bytes(),
+            Self::Bytes(bytes) => bytes,
+        }
+    }
+}
+
 #[pyfunction(name = "search_text")]
 #[pyo3(signature = (matcher, text, path="<text>", before_context=0, after_context=0))]
-fn search_text_py(matcher: PyRef<'_, RegexPy>, text: &str, path: &str, before_context: usize, after_context: usize) -> PyResult<Vec<SearchLinePy>> {
-    search_text_core(path.to_string(), text, matcher.matcher.clone(), before_context, after_context, false)
+fn search_text_py(
+    py: Python<'_>,
+    matcher: PyRef<'_, RegexPy>,
+    text: &Bound<'_, PyAny>,
+    path: &str,
+    before_context: usize,
+    after_context: usize,
+) -> PyResult<Vec<SearchLinePy>> {
+    let payload = TextPayload::extract(text)?;
+    let matcher = matcher.matcher.clone();
+    let path = path.to_string();
+    py.detach(move || search_bytes_core(path, payload.as_bytes(), matcher, before_context, after_context, false))
         .map(|lines| lines.into_iter().map(SearchLinePy::from).collect())
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
@@ -1317,7 +1351,7 @@ impl From<SearchLine> for SearchLinePy {
 
 fn search_line_py(line: SearchLine, display_lnhash: bool) -> SearchLinePy { SearchLinePy { display_lnhash, ..SearchLinePy::from(line) } }
 
-#[pymodule]
+#[pymodule(gil_used = false)]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("MAXLEN", MAXLEN)?;
     m.add_class::<SearchLinePy>()?;
