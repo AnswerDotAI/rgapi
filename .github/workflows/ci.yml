@@ -7,37 +7,24 @@ on:
   pull_request:
 
 jobs:
-  rust-test:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
-
-  python-test:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14', '3.14t', '3.15', '3.15t']
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python-version }}
-          allow-prereleases: true
-      - run: pip install -e . pytest
-      - if: ${{ contains(matrix.python-version, 't') }}
-        run: python -c "import rgapi, sys; assert not sys._is_gil_enabled()"
+          python-version: '3.12'
+      - run: pip install -e '.[dev]'
       - run: pytest -q
 
   build:
-    needs: [rust-test, python-test]
+    needs: test
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, windows-2025]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
         python:
           - { version: '3.10', interpreter: 'python3.10', wheel-tag: 'cp310-cp310' }
           - { version: '3.11', interpreter: 'python3.11', wheel-tag: 'cp311-cp311' }
@@ -50,48 +37,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - if: runner.os != 'Linux'
-        uses: actions/setup-python@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python.version }}
           allow-prereleases: true
       - uses: PyO3/maturin-action@v1
         with:
-          args: --profile dist --compatibility pypi --out dist -i ${{ runner.os == 'Linux' && matrix.python.interpreter || 'python' }}
+          args: --profile dist --out dist -i ${{ runner.os == 'Linux' && matrix.python.interpreter || 'python' }}
           maturin-version: v1.15.0
-          manylinux: 2014
-      - uses: actions/upload-artifact@v7
-        with:
-          name: wheels-${{ matrix.os }}-${{ matrix.python.version }}
-          path: dist
-          if-no-files-found: error
-
-  wheel-test:
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-26, windows-2025]
-        python:
-          - { version: '3.10', wheel-tag: 'cp310-cp310' }
-          - { version: '3.11', wheel-tag: 'cp311-cp311' }
-          - { version: '3.12', wheel-tag: 'cp312-cp312' }
-          - { version: '3.13', wheel-tag: 'cp313-cp313' }
-          - { version: '3.14', wheel-tag: 'cp314-cp314' }
-          - { version: '3.14t', wheel-tag: 'cp314-cp314t' }
-          - { version: '3.15', wheel-tag: 'cp315-cp315' }
-          - { version: '3.15t', wheel-tag: 'cp315-cp315t' }
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python.version }}
-          allow-prereleases: true
-      - uses: actions/download-artifact@v8
-        with:
-          name: wheels-${{ matrix.os }}-${{ matrix.python.version }}
-          path: dist
+          manylinux: auto
       - run: python -m pip install fastcore pytest
       - name: Install the exact wheel under test
         shell: bash
@@ -102,9 +56,12 @@ jobs:
           python -m pip install --no-deps "${wheels[0]}"
       - if: ${{ contains(matrix.python.version, 't') }}
         run: python -c "import rgapi, sys; assert not sys._is_gil_enabled()"
-      - if: ${{ !contains(matrix.python.version, 't') }}
-        run: python -c "import rgapi"
-      - run: python -m pytest -q tests/test_rgapi.py -k 'bytes_payload or chinese_text or shared_bytes_payload or shared_matcher_and_bytes'
+      - run: python -m pytest -q
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.python.version }}
+          path: dist
+          if-no-files-found: error
 
   sdist:
     runs-on: ubuntu-latest
@@ -123,7 +80,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [wheel-test, sdist]
+    needs: [build, sdist]
     runs-on: ubuntu-latest
     permissions:
       id-token: write
