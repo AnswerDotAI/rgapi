@@ -1,4 +1,4 @@
-import _thread, concurrent.futures, json, threading
+import _thread, concurrent.futures, json, os, threading
 
 import pytest
 
@@ -78,6 +78,7 @@ def test_pathlike_arguments_and_expanduser(tmp_path, monkeypatch):
     assert search_nb("TODO", tmp_path / "one.ipynb", display_path=nb_display)[0].path == str(nb_display)
 
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     assert fd("~", glob="*.py") == ["src/app.py"]
 
 
@@ -140,11 +141,11 @@ def test_rgignore_can_override_gitignore(tmp_path):
     assert "sub/app.py" in set(fd(str(tmp_path)))
 
 def test_depth_size_and_filesystem_options(tmp_path):
-    (tmp_path / "top.txt").write_text("TODO\n")
+    (tmp_path / "top.txt").write_bytes(b"TODO\n")
     sub = tmp_path / "sub"
     sub.mkdir()
-    (sub / "small.txt").write_text("TODO\n")
-    (sub / "large.txt").write_text("TODO large\n")
+    (sub / "small.txt").write_bytes(b"TODO\n")
+    (sub / "large.txt").write_bytes(b"TODO large\n")
 
     assert fd(str(tmp_path), max_depth=1) == ["top.txt"]
     assert set(fd(str(tmp_path), min_depth=2)) == {"sub/large.txt", "sub/small.txt"}
@@ -208,9 +209,9 @@ def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
 
 def test_rg_str_truncates_long_lines(tmp_path):
     long = "x" * 200
-    (tmp_path / "a.py").write_text(f"TODO {long}\n")
+    (tmp_path / "a.py").write_text(f"TODO {long}\n", encoding="utf-8", newline="\n")
     short = "TODO é" + "y" * 200  # multibyte char before the cut point
-    (tmp_path / "b.py").write_text(short + "\n")
+    (tmp_path / "b.py").write_text(short + "\n", encoding="utf-8", newline="\n")
     res = rg("TODO", str(tmp_path))
     line_a = next(r for r in res if r.path == "a.py")
     assert line_a.line == f"TODO {long}"                       # data stays full
@@ -650,7 +651,7 @@ def test_fileentry_and_ls(tmp_path):
 
 def test_file_root_ignores_siblings_and_depth_cap_permissions(tmp_path):
     f = tmp_path / "f.txt"
-    f.write_text("hello x\n")
+    f.write_bytes(b"hello x\n")
     (tmp_path / ".gitignore").write_text("f.txt\n.hid.txt\n")
     hid = tmp_path / ".hid.txt"
     hid.write_text("hello x\n")
@@ -666,10 +667,11 @@ def test_file_root_ignores_siblings_and_depth_cap_permissions(tmp_path):
         got = sorted({r.path for r in rg("x", tmp_path, max_depth=1, ignore=False, hidden=True)})
         assert got == [".gitignore", ".hid.txt", "f.txt"]                       # depth-cap dir skipped silently
         assert list(fd(tmp_path, max_depth=1, ignore=False)) == ["f.txt"]
-        with pytest.raises(ValueError, match="ermission"):
-            rg("x", tmp_path)                                     # uncapped: unreadable dir in tree is fatal
-        with pytest.raises(ValueError, match="ermission"):
-            rg("x", tmp_path, max_depth=2)                        # cap above the dir: descent needed, fatal
+        if os.name != "nt":
+            with pytest.raises(ValueError, match="ermission"):
+                rg("x", tmp_path)                                 # uncapped: unreadable dir in tree is fatal
+            with pytest.raises(ValueError, match="ermission"):
+                rg("x", tmp_path, max_depth=2)                    # cap above the dir: descent needed, fatal
     finally: locked.chmod(0o755)
 
 def test_symlink_link_target_and_show_target(tmp_path):
