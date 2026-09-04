@@ -8,14 +8,14 @@ on:
 
 jobs:
   rust-test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test
 
   python-test:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
@@ -107,7 +107,7 @@ jobs:
       - run: python -m pytest -q tests/test_rgapi.py -k 'bytes_payload or chinese_text or shared_bytes_payload or shared_matcher_and_bytes'
 
   sdist:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: PyO3/maturin-action@v1
@@ -124,7 +124,7 @@ jobs:
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [wheel-test, sdist]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: write
