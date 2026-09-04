@@ -268,11 +268,11 @@ def test_search_path_skips_binary_and_invalid_utf8(tmp_path):
 
 def test_rg_keyboard_interrupt_cancels(tmp_path):
     (tmp_path / "big.txt").write_text("alpha beta gamma\n" * 1_000_000)
-    timer = threading.Timer(0.001, _thread.interrupt_main)
+    timer = threading.Timer(0.05, _thread.interrupt_main)
     try:
         with pytest.raises(KeyboardInterrupt):
             timer.start()
-            rg("needle_that_is_not_present", str(tmp_path))
+            rg("alpha", str(tmp_path))
     finally: timer.cancel()
 
 def test_direct_regex_and_search_apis(tmp_path):
