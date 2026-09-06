@@ -1,6 +1,6 @@
 # rgapi
 
-`rgapi` is a Python API for ripgrep-style walking and search. It is meant for Python code that wants `fd`-style file discovery or `rg`-style searching without shelling out.
+`rgapi` provides `fd`-style file discovery and `rg`-style text search from Python without starting a shell command.
 
 It uses the same `ignore`, `grep-regex`, and `grep-searcher` crates that ripgrep uses for walking, regex matching, and file scanning. Walking and searching run in parallel by default. Most expensive work stays in Rust.
 
@@ -25,7 +25,7 @@ from rgapi import nbrg
 nbrg("read_csv", ".", cell_context=1)
 ```
 
-Every walk and search has an async twin, plus streaming forms that yield results as they are found (see [Async](#async)):
+Walk and search functions have async versions. Streaming versions yield results as the search finds them. See [Async](#async):
 
 ```python
 from rgapi import fda, rga, rga_iter, nbrga, nbrga_iter
@@ -34,7 +34,7 @@ await rga("TODO", ".", ext="py", timeout_ms=200)
 async for row in rga_iter("TODO", "."): print(row)
 ```
 
-For direct access to the regex, search, and walk pieces:
+Use the lower-level functions to compile a regex, search text or a single file, or walk a directory:
 
 ```python
 from rgapi import compile, search_path, search_text, walk
@@ -54,19 +54,37 @@ search_path(matcher, "src/lib.rs", display_path="src/lib.rs")
 pip install rgapi
 ```
 
-## Semantics
+## File discovery
 
-`fd` and `walk` return slash-separated paths relative to `root`. They use the `ignore` crate, so `.gitignore`, `.ignore`, and the usual ripgrep filters apply by default. `.rgignore` files are also honored and take precedence over `.gitignore`. Hidden files are skipped unless `hidden=True`. Pass `ignore=False` to disable all ignore filtering (including `.rgignore`). Symlinks are not followed unless `follow_links=True`; `same_file_system=True` avoids crossing filesystem boundaries. Traversal is parallel, and result order is not guaranteed; use `sorted(...)` if order matters. `root` arguments accept `str` or `pathlib.Path` and expand `~`; `.`, `./`, and paths containing `..` work across the sync and async APIs.
+`fd` and `walk` return slash-separated paths relative to `root`. Pass `root` as a `str` or `pathlib.Path`. The sync and async APIs expand `~` and accept `.`, `./`, and paths containing `..`.
 
-`fd` adds fd-like filtering on top of `walk`: `pattern` is a smart-case regex matched against each basename, and `include`/`exclude` use glob syntax. Lowercase patterns match case-insensitively; a pattern containing uppercase letters is case-sensitive. Use `path_re` when matching the slash-separated relative path instead. `glob=` is accepted as an alias for `include=`. A basename glob such as `*.py` also matches recursively, so it finds `src/app.py`. Use `ext="py"` or `ext=["py", "rs"]` for extension filters, which compose as AND with `include`/`glob` (so `include="src/*", ext="py"` means `src/*` *and* `*.py`, like combining `rg -g` with `-t`); use `min_depth=`/`max_depth=` to bound recursion, and `max_filesize=` to skip files above a byte limit.
+Discovery uses the `ignore` crate with ripgrep's default filters. It reads `.gitignore`, `.ignore`, and `.rgignore` files. `.rgignore` takes precedence over `.gitignore`. Pass `ignore=False` to disable all ignore-file filtering, including `.rgignore`.
 
-`ls` lists like the shell command: it is `fd` with defaults flipped to one level (`max_depth=1`), directories included, ignore rules off, and results sorted by name. `hidden=True` is `ls -a`, and every `fd` filter still applies.
+Hidden files are skipped unless `hidden=True`. Symlinks are followed only with `follow_links=True`. Use `same_file_system=True` to avoid crossing filesystem boundaries.
 
-`fd_iter` is the lazy form of `fd`, yielding `FileEntry` paths as the walk finds them, and takes every `fd` filter. It has no `timeout_ms`, since a consumer that stops asking for paths ends the walk itself.
+Traversal runs in parallel without guaranteed result order. Use `sorted(...)` when order matters.
 
-`path_re` and `skip_path_re` are regex filters on slash-separated relative paths. They filter returned paths or searched files, but do not control traversal. `skip_dir` uses glob syntax to prune matching directory subtrees, and `skip_dir_re` does the same with regex.
+`fd` adds filename filters to `walk`. Its `pattern` is a smart-case regex matched against each basename. Lowercase patterns match case-insensitively. A pattern containing uppercase letters is case-sensitive. Use `path_re` to match the slash-separated relative path instead.
 
-`rg` and `rg_iter` return structured rows rather than raw CLI text. They accept the same `include`, `exclude`, `glob`, `ext`, `path_re`, `skip_path_re`, `skip_dir`, `skip_dir_re`, `min_depth`, `max_depth`, `max_filesize`, `follow_links`, and `same_file_system` filters as `fd`. Each row is a `SearchLine` with:
+`include` and `exclude` use glob syntax. `glob=` is an alias for `include=`. A basename glob such as `*.py` also matches nested paths such as `src/app.py`.
+
+Filter extensions with `ext="py"` or `ext=["py", "rs"]`. Extension and glob filters must both match. For example, `include="src/*", ext="py"` requires `src/*` and `*.py`, like combining `rg -g` with `-t`.
+
+Set `min_depth` and `max_depth` to bound recursion. `max_filesize` skips files above a byte limit.
+
+`ls` follows the shell command's listing conventions. It uses `fd` with `max_depth=1`, includes directories, disables ignore rules, and sorts by name. Set `hidden=True` for `ls -a` behaviour. All `fd` filters remain available.
+
+`fd_iter` yields `FileEntry` paths as the walk finds them. It accepts every `fd` filter. Stopping iteration ends the walk. It does not accept `timeout_ms`.
+
+`path_re` and `skip_path_re` filter slash-separated relative paths using regexes. They select returned paths or searched files without changing traversal. To skip entire subtrees, use `skip_dir` with a glob or `skip_dir_re` with a regex.
+
+## Text search
+
+`rg` and `rg_iter` return structured `SearchLine` rows. They accept the same filters as `fd`: `include`, `exclude`, `glob`, `ext`, `path_re`, `skip_path_re`, `skip_dir`, `skip_dir_re`, `min_depth`, `max_depth`, `max_filesize`, `follow_links`, and `same_file_system`.
+
+Search is case-sensitive by default, matching `rg`. Use `smart_case=True` for `rg --smart-case` behaviour. Use `case_sensitive=False` to force case-insensitive matching.
+
+Each `SearchLine` has these fields:
 
 ```text
 kind         'match', 'before', 'after', or 'context'
@@ -77,13 +95,35 @@ line         line text without the trailing newline
 matches      list of (start, end) byte offsets for match rows
 ```
 
-`rg`, `search_text`, and `search_path` return `SearchResults` by default, a list subclass whose `str()` and notebook pretty display are rg-style multiline text. `rg_iter` yields rows lazily.
+`rg`, `search_text`, and `search_path` return `SearchResults` by default. This list subclass displays as rg-style multiline text in `str()` and notebook pretty output. `rg_iter` yields rows lazily.
 
-`SearchLine` has a structured `repr`, an rg-style `str` (the `line` is truncated to 180 chars with a trailing `…` for display; `repr` and `asdict()` keep the full line), and `SearchLine.asdict()` returns row fields as a plain Python dict. Pass `rg(..., lnhashs=True)` or `rg_iter(..., lnhashs=True)` to show `lnhash` addresses instead of line numbers in row display while keeping `line_number` available. `rg(..., paths=True)` returns unique matched paths, and `rg(..., count=True)` returns the total number of match spans. `paths` and `count` cannot both be set.
+`SearchLine` has a structured `repr` and an rg-style `str`. The string display truncates `line` to 180 characters with a trailing `…`. `repr` and `asdict()` retain the full line. `SearchLine.asdict()` returns the fields as a plain Python dictionary.
 
-`fd`, `walk`, `ls`, and `rg`/`nbrg` with `paths=True` return `PathResults`, a list of `FileEntry` rows. A `FileEntry` is a `str` subclass holding the relative path, so all string uses keep working, and it stats itself lazily on first access: `stat` is a cached `os.lstat` result (`None` if the path has vanished), with `size`, `mtime`, and `is_dir` derived from it. A `PathResults` displays as an `ls -l`-style long listing, capped at `rgapi.MAX_REPR` rows with a final `… N more` line, so stats are read only for displayed rows; `str()` is still one plain path per line, and `list(res)` shows plain paths. `rg(..., timeout_ms=200)` and `fd(..., timeout_ms=200)` stop at the deadline and return whatever was collected by then; `walk`, `ls`, and the async forms take it too. Results record how they ended: `stop_reason` is `None` for a complete result, `"max_results"` when truncated by `max_results`, or `"timeout"` when a deadline hit, and `complete` is true when `stop_reason` is `None`. `count=True` returns a plain int, which cannot carry the flag, so it rejects `timeout_ms`.
+Pass `lnhashs=True` to `rg` or `rg_iter` to display hash addresses instead of line numbers. The `line_number` field remains available.
 
-`before_context`, `after_context`, and `context` are like `rg -B`, `rg -A`, and `rg -C`. Files containing NUL bytes or invalid UTF-8 are skipped.
+For other result forms, use `rg(..., paths=True)` to return unique matched paths or `rg(..., count=True)` to count match spans. `paths` and `count` cannot both be set.
+
+### Path results
+
+`fd`, `walk`, and `ls` return `PathResults`. So do `rg` and `nbrg` with `paths=True`. This is a list of `FileEntry` rows.
+
+A `FileEntry` is a `str` subclass containing a relative path. Its `stat` property calls `os.lstat` on first access and caches the result. It returns `None` if the path has vanished. `size`, `mtime`, and `is_dir` use the cached stat result. The object also supports ordinary string operations.
+
+`PathResults` displays as an `ls -l`-style listing of at most `rgapi.MAX_REPR` rows. A final `… N more` line reports omitted rows. Only displayed rows need stat calls. `str()` returns one plain path per line. `list(res)` also displays plain paths.
+
+### Limits and timeouts
+
+Set `timeout_ms` on `rg`, `fd`, `walk`, or `ls` to stop at a deadline and return the results collected so far. Their async versions accept it too. Results report why the operation stopped:
+
+- `stop_reason=None` means the result is complete.
+- `stop_reason="max_results"` means `max_results` truncated the result.
+- `stop_reason="timeout"` means the deadline was reached.
+
+`complete` is true exactly when `stop_reason` is `None`. `count=True` returns a plain integer without a completion flag. It cannot be combined with `timeout_ms`.
+
+### Context lines
+
+`before_context`, `after_context`, and `context` correspond to `rg -B`, `rg -A`, and `rg -C`. Files containing NUL bytes or invalid UTF-8 are skipped.
 
 ### Block summaries
 
@@ -93,15 +133,17 @@ matches      list of (start, end) byte offsets for match rows
 rg("TODO", ".", summary=True, context=1, maxlen=120)
 ```
 
-The result is `BlockResults`, a list of `SearchBlock` objects. Each block has `path`, `block_index`, `start_line`, `end_line`, `start_lnhash`, `end_lnhash`, `kind`, full `source`, and `matches`. Its display is `path:start-end:source` for matches and `path:start-end-source` for context. With `lnhashs=True`, the numeric range becomes copyable boundary addresses such as `path:4|a3f2|,6|b1c3|:source`. Embedded newline runs are shown as `¶`; `maxlen` limits displayed source without changing `source` or `asdict()`.
+The result is `BlockResults`, a list of `SearchBlock` objects. Each block has `path`, `block_index`, `start_line`, `end_line`, `start_lnhash`, `end_lnhash`, `kind`, full `source`, and `matches`.
 
-In summary mode, `before_context`, `after_context`, and `context` count neighbouring blocks. `max_results` counts matching blocks and retains their block context. `summary=True` cannot be combined with `paths` or `count`; it can be combined with `lnhash` when copyable block boundaries are useful.
+Matches display as `path:start-end:source`. Context displays as `path:start-end-source`. With `lnhashs=True`, the range uses copyable boundary addresses such as `path:4|a3f2|,6|b1c3|:source`. Newline runs display as `¶`. `maxlen` limits the displayed text without changing `source` or `asdict()`.
 
-Search is case-sensitive by default, matching `rg`. Use `smart_case=True` for `rg --smart-case` behavior, or `case_sensitive=False` to force case-insensitive matching.
+In summary mode, `before_context`, `after_context`, and `context` count neighbouring blocks. `max_results` counts matching blocks and retains their context. `summary=True` cannot be combined with `paths` or `count`. It can be combined with `lnhash` for copyable block boundaries.
 
 ## Notebooks
 
-`nbrg` searches Jupyter `.ipynb` files cell-by-cell, so results are *cells* rather than raw JSON lines, and each match is identified by its **cell id** (the nbformat cell/message id) rather than a line number. Searching a notebook with plain `rg` matches the escaped JSON text (including outputs and metadata) and reports meaningless JSON line numbers; `nbrg` instead searches each cell's reconstructed **source** and reports the cell id, which is stable across edits and points at the actual unit you work with.
+`nbrg` searches cell source in Jupyter `.ipynb` files and returns matching cells. Each result identifies the cell by its nbformat cell/message id, which stays stable across edits.
+
+Plain `rg` searches escaped notebook JSON, including outputs and metadata. Its line numbers refer to that JSON file. `nbrg` searches the reconstructed cell source and identifies the cell you would edit.
 
 ```python
 from rgapi import nbrg
@@ -110,7 +152,7 @@ nbrg("read_csv", ".")                  # cells whose source matches, across all 
 nbrg("read_csv", ".", cell_context=1)  # also include neighbouring cells as context
 ```
 
-Notebooks are walked, parsed, and matched together in one parallel Rust pass, using the same regex engine as `rg`, so regex behaviour and the `case_sensitive`/`smart_case` flags match `rg`. Only cell `source` is searched, not outputs or metadata. `nbrg` accepts the same discovery filters as `fd`/`rg` (`include`, `exclude`, `glob`, `hidden`, `max_depth`, `skip_dir`, …).
+Notebook discovery, parsing, and matching run together in one parallel Rust pass. Matching uses `rg`'s regex engine with the same `case_sensitive` and `smart_case` behaviour. `nbrg` accepts the discovery filters from `fd` and `rg`, including `include`, `exclude`, `glob`, `hidden`, `max_depth`, and `skip_dir`.
 
 `nbrg` returns `NbResults`, a list of `NbCell`. Each `NbCell` has:
 
@@ -124,13 +166,23 @@ source       full cell source
 matches      list of SearchLine rows for the matched lines within the cell
 ```
 
-`NbCell.asdict()` returns those fields as a plain dict (with `matches` as `SearchLine` dicts). `str()` and pretty display show one line per cell, newline runs shown as `¶`, keyed by `cell_id`: `path:cell_id:source` for matches and `path:cell_id-source` for context. A match row starts at its first matched line: earlier lines display as `…[Ln]` (`n` the matched line's 1-based number in the cell), except that a leading `#|` directive line is kept, e.g. `#| export…[L4]needle here`. `maxlen` controls the displayed source length and defaults to 120; the full source remains in `source` and `asdict()`. A cell with several matches appears once, with every hit collected in `matches`.
+`NbCell.asdict()` returns these fields as a plain dictionary. Its `matches` field contains `SearchLine` dictionaries.
 
-`cell_context=N` includes the `N` cells before and after each matching cell as `kind="context"` rows (deduplicated per notebook).
+`str()` and pretty display show one line per cell. Matches use `path:cell_id:source`. Context uses `path:cell_id-source`. Newline runs display as `¶`.
 
-`nbrg_iter` yields `NbCell` rows lazily as notebooks are parsed. `nbrg` also accepts `max_results` (at most that many cells, after sorting by path and cell index), `count=True` (number of matching cells), and `timeout_ms=` with the same `stop_reason` semantics as `rg`.
+A matching cell's display starts at its first matched line. Earlier lines are replaced by `…[Ln]`, where `n` is the matched line's one-based number within the cell. A leading `#|` directive is retained, as in `#| export…[L4]needle here`.
 
-Notebook walking, parsing, and matching all happen in parallel in Rust, in the same pass as the file walk. Parsing uses a lean model that reads only each cell's `id`, `cell_type`, and `source` and skips outputs and metadata, so large embedded outputs (images, plots) are never materialized. `search_nb(pattern, path, ...)` searches a single notebook file the same way.
+`maxlen` limits displayed source and defaults to 120. The full source remains in `source` and `asdict()`. Each cell appears once even when it has multiple matches. All hits remain in `matches`.
+
+`cell_context=N` includes the `N` cells before and after each match as `kind="context"` rows. Context cells are deduplicated within each notebook.
+
+`nbrg_iter` yields `NbCell` rows as notebooks are parsed. For collected results, `nbrg` accepts these limits and result options:
+
+- `max_results` returns at most that many cells after sorting by path and cell index.
+- `count=True` returns the number of matching cells.
+- `timeout_ms` applies a deadline with the same `stop_reason` values as `rg`.
+
+The parser reads only each cell's `id`, `cell_type`, and `source`. It skips outputs and metadata without loading embedded images or plots. `search_nb(pattern, path, ...)` searches a single notebook file in the same way.
 
 `rgapi-nbrg` exposes notebook search without requiring a Python kernel:
 
@@ -144,7 +196,7 @@ Run `rgapi-nbrg --help` for its discovery, matching, and output options.
 
 ## Async
 
-`fda`, `rga`, and `nbrga` are awaitable twins of `fd`, `rg`, and `nbrg`, and `fda_iter`, `rga_iter` and `nbrga_iter` are async generators that yield rows as the search finds them. All take the same arguments and return the same types as their sync counterparts.
+`fda`, `rga`, and `nbrga` are async versions of `fd`, `rg`, and `nbrg`. The async generators `fda_iter`, `rga_iter`, and `nbrga_iter` yield rows as the search finds them. Async functions accept the same arguments and return the same types as their synchronous equivalents.
 
 ```python
 from rgapi import fda, rga, rga_iter
@@ -155,9 +207,11 @@ if not res.complete: print(f"partial results: {res.stop_reason}")
 async for row in rga_iter("TODO", "."): ...
 ```
 
-None of this uses `asyncio.to_thread` or the loop's executor. The walk and search run on Rust threads, and a single callback settles the awaited future (or feeds the generator's queue) through `loop.call_soon_threadsafe`, so the event loop never blocks and contextvars behave normally.
+Walking and searching use Rust threads, without `asyncio.to_thread` or the event loop's executor. A callback uses `loop.call_soon_threadsafe` to complete the awaited future or supply results to the generator's queue. The event loop remains unblocked, with normal `contextvars` behaviour.
 
-Cancellation cleans up the Rust workers automatically. Wrapping a call in `asyncio.wait_for` or `asyncio.timeout`, cancelling the task (as starlette does when a client disconnects), or leaving an `async for` early all stop the search within about one row. One caveat comes from the language rather than the library: `break` inside `async for` only finalizes the generator at GC time, so for prompt cleanup wrap the iterator in `contextlib.aclosing`:
+Cancellation stops the Rust workers within about one row. This includes timeouts from `asyncio.wait_for` or `asyncio.timeout`. It also includes task cancellation, such as starlette cancelling a disconnected client's request.
+
+Wrap an async iterator in `contextlib.aclosing` when leaving its loop early. `break` alone delays generator finalization until garbage collection. The context manager provides prompt cleanup:
 
 ```python
 async with aclosing(rga_iter("TODO", ".")) as it:
@@ -165,7 +219,7 @@ async with aclosing(rga_iter("TODO", ".")) as it:
         if enough(row): break
 ```
 
-The streaming forms suit incremental display, such as pushing each batch of results to a browser as it arrives. The collected forms with `timeout_ms` give the best results available within a budget, and `asyncio.wait_for` gives timeout-as-failure. Pick per call site.
+Use streaming results for incremental display, such as sending batches to a browser as they arrive. Collected results with `timeout_ms` return what was found before the deadline. Use `asyncio.wait_for` when a timeout should raise instead.
 
 
 ## Benchmarks
