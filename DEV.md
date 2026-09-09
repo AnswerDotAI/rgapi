@@ -48,4 +48,6 @@ Truncation is recorded on collected results: `max_results` sets `stop_reason="ma
 
 Path results are `FileEntry` rows: a `str` subclass carrying the walk root, so paths stay plain strings for compatibility while stat info loads lazily (one cached `os.lstat` per entry, read only on attribute access). The wrapping happens at result construction on the Python side; Rust still streams plain strings. `PathResults.__repr__` shows an `ls -l`-style listing capped at `MAX_REPR` rows, so a huge result never stats everything, while `str()` stays one plain path per line. `ls` is `fd` with shell-style defaults (one level, dirs, ignore rules off), re-sorted with `stop_reason` preserved.
 
+Rust callers can consume a `StreamIter` with `cancel_and_join()` to cancel, drain queued results, and wait for the walk's workers to finish. `Drop` remains nonblocking. Since filesystem calls already in progress must return before joining completes, keep `cancel_and_join()` off async executors.
+
 This package intentionally has no CLI. Python is the interface.
