@@ -104,12 +104,22 @@ pub fn find_iter(opts: &FindOptions) -> Result<FindIter, RgApiError> {
     ))
 }
 
-pub struct StreamIter<T> { rx: mpsc::Receiver<Result<T, RgApiError>>, cancel: Arc<AtomicBool>, _worker: std::thread::JoinHandle<()> }
+pub struct StreamIter<T> { rx: mpsc::Receiver<Result<T, RgApiError>>, cancel: Arc<AtomicBool>, worker: Option<std::thread::JoinHandle<()>> }
 
 impl<T> StreamIter<T> {
     pub fn cancel(&self) { self.cancel.store(true, Ordering::Relaxed); }
 
     pub fn cancel_flag(&self) -> Arc<AtomicBool> { self.cancel.clone() }
+
+    /// Cancel and wait for the walk's workers to finish. Drain queued sends before
+    /// joining so a full result channel cannot deadlock shutdown. Unlike Drop,
+    /// this guarantees no background walk remains when it returns. Filesystem
+    /// calls already in progress must return first; run this off an async executor.
+    pub fn cancel_and_join(mut self) -> Result<(), RgApiError> {
+        self.cancel();
+        while self.rx.recv().is_ok() {}
+        self.worker.take().expect("stream owns its worker").join().map_err(|_| RgApiError::new("search worker panicked"))
+    }
 
     pub fn next_timeout(&mut self, timeout: std::time::Duration) -> Result<Result<T, RgApiError>, mpsc::RecvTimeoutError> { self.rx.recv_timeout(timeout) }
 
@@ -137,6 +147,33 @@ impl<T> Iterator for StreamIter<T> {
 }
 
 impl<T> Drop for StreamIter<T> { fn drop(&mut self) { self.cancel(); } }
+
+#[cfg(test)]
+mod close_tests {
+    use super::*;
+
+    #[test]
+    fn cancel_and_join_drains_full_channel_and_waits_for_worker() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let (started, ready) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = cancel.clone();
+        let done = Arc::new(AtomicBool::new(false));
+        let worker_done = done.clone();
+        let worker = std::thread::spawn(move || {
+            tx.send(Ok(1)).unwrap();
+            started.send(()).unwrap();
+            // This blocks while the channel is full; close must drain, not just join.
+            tx.send(Ok(2)).unwrap();
+            assert!(worker_cancel.load(Ordering::Acquire));
+            worker_done.store(true, Ordering::Release);
+        });
+        ready.recv().unwrap();
+        StreamIter { rx, cancel: cancel.clone(), worker: Some(worker) }.cancel_and_join().unwrap();
+        assert!(cancel.load(Ordering::Acquire));
+        assert!(done.load(Ordering::Acquire));
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_walk<T, F>(
@@ -181,7 +218,7 @@ where
             })
         });
     });
-    StreamIter { rx, cancel, _worker: worker }
+    StreamIter { rx, cancel, worker: Some(worker) }
 }
 
 fn find_entry(
@@ -365,7 +402,7 @@ mod tests {
                 if tx.send(Ok(i)).is_err() { return; }
             }
         });
-        StreamIter { rx, cancel, _worker: worker }
+        StreamIter { rx, cancel, worker: Some(worker) }
     }
 
     #[test]
