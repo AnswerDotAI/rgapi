@@ -50,4 +50,6 @@ Path results are `FileEntry` rows: a `str` subclass carrying the walk root, so p
 
 Rust callers can consume a `StreamIter` with `cancel_and_join()` to cancel, drain queued results, and wait for the walk's workers to finish. `Drop` remains nonblocking. Since filesystem calls already in progress must return before joining completes, keep `cancel_and_join()` off async executors.
 
+Notebook hierarchy uses `heading_level(source)`, `section_range(levels, idx)` and `ancestor_indices(levels, idx)`. Callers supply zero for non-heading cells. Heading detection skips blank lines and lines starting with `#|`, then checks the first remaining line against `^#{1,6} \w`. It does not search past ordinary text. Section ranges include the addressed cell and end before the next equal-or-higher heading; non-headings select themselves. Ancestors exclude the addressed cell and are returned outermost first. These are calculations over the supplied levels, without retained outline state. Rustygate uses them for its cell selectors.
+
 This package intentionally has no CLI. Python is the interface.

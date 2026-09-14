@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::sync::atomic::Ordering;
 
+use grep_matcher::Matcher;
 use grep_regex::RegexMatcher;
 use ignore::{DirEntry, WalkState};
 use serde::Deserialize;
@@ -10,6 +11,36 @@ use serde::Deserialize;
 use crate::RgApiError;
 use crate::search::{SearchLine, compile_regex, search_text};
 use crate::walk::{PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk};
+
+static HEADING_RE: LazyLock<RegexMatcher> = LazyLock::new(|| RegexMatcher::new(r"^#{1,6} \w").unwrap());
+
+/// Heading level of the first nonblank line after skipping `#|` directives; zero unless it matches `^#{1,6} \w`.
+pub fn heading_level(source: &str) -> usize {
+    let line = source.lines().find(|l| !l.trim().is_empty() && !l.starts_with("#|")).unwrap_or("");
+    if !HEADING_RE.is_match(line.as_bytes()).unwrap_or(false) { return 0; }
+    line.bytes().take_while(|&b| b == b'#').count()
+}
+
+/// A heading and its descendants; a non-heading selects itself. Zero levels represent non-heading cells.
+pub fn section_range(levels: &[usize], idx: usize) -> std::ops::Range<usize> {
+    if levels[idx] == 0 { return idx..idx + 1; }
+    let end = (idx + 1..levels.len()).find(|&i| levels[i] > 0 && levels[i] <= levels[idx]).unwrap_or(levels.len());
+    idx..end
+}
+
+/// Enclosing heading indices, outermost first, excluding the addressed cell.
+pub fn ancestor_indices(levels: &[usize], idx: usize) -> Vec<usize> {
+    let mut level = if levels[idx] == 0 { 7 } else { levels[idx] };
+    let mut parents = Vec::new();
+    for i in (0..idx).rev() {
+        if levels[i] > 0 && levels[i] < level {
+            parents.push(i);
+            level = levels[i];
+        }
+    }
+    parents.reverse();
+    parents
+}
 
 #[derive(Debug, Clone)]
 pub struct NbOptions {
