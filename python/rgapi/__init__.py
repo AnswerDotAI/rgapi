@@ -1,8 +1,7 @@
-import asyncio, os, re
+import asyncio, re
 from contextlib import aclosing
 from datetime import datetime
-from functools import cached_property
-from stat import S_ISDIR, S_ISLNK, filemode
+from stat import S_ISLNK, filemode
 
 from os import fspath
 from pathlib import Path
@@ -42,48 +41,32 @@ def _hsize(n):
         n /= 1024
     return f"{n:.0f}" if u == "B" else f"{n:.1f}{u}"
 
-class FileEntry(str):
-    "Relative path that lazily stats itself for `size`/`mtime`/`is_dir`/`link_target` and `ls -l`-style display"
-    def __new__(cls, path, root=".", show_target=False):
-        self = super().__new__(cls, path)
-        self.root,self.show_target = os.path.abspath(root),show_target
-        return self
-    @cached_property
-    def stat(self):
-        "Cached `os.lstat` result; `None` if the path has vanished"
-        try: return os.lstat(os.path.join(self.root, self))
-        except OSError: return None
-    @property
-    def size(self): return None if self.stat is None else self.stat.st_size
-    @property
-    def mtime(self): return None if self.stat is None else datetime.fromtimestamp(self.stat.st_mtime)
-    @property
-    def is_dir(self): return self.stat is not None and S_ISDIR(self.stat.st_mode)
-    @cached_property
-    def link_target(self):
-        "`os.readlink` result for a symlink; `None` otherwise"
-        if self.stat is None or not S_ISLNK(self.stat.st_mode): return None
-        try: return os.readlink(os.path.join(self.root, self))
-        except OSError: return None
-    def _line(self):
-        if self.stat is None: return f"{'?':10} {'?':>7} {'?':16} {self}"
-        tgt = f" -> {self.link_target}" if self.show_target and self.link_target is not None else ""
-        return f"{filemode(self.stat.st_mode)} {_hsize(self.stat.st_size):>7} {self.mtime:%Y-%m-%d %H:%M} {self}{tgt}"
-    def _repr_markdown_(self): return f"`{self._line()}`"
-
-def _entry_root(root):
-    "Stat base for `FileEntry`: a file root's entries are named relative to its parent"
-    return os.path.dirname(root) if os.path.isfile(root) else root
-
-def _fe(paths, root, show_target=False):
-    root = _entry_root(root)
-    return (FileEntry(p, root, show_target) for p in paths)
+def _path_base(root, follow_links=True):
+    root = Path(root).absolute()
+    return root if (follow_links or not root.is_symlink()) and root.is_dir() else root.parent
 
 class PathResults(_Results):
-    "List of relative `FileEntry` paths; repr is `ls -l`-style, `str()` is line-per-path"
-    def __str__(self): return "\n".join(self)
+    "Absolute `Path` objects with root-relative plain and `ls -l`-style displays"
+    def __init__(self, paths=(), root=".", show_target=False):
+        self.root,self.show_target = Path(root).absolute(),show_target
+        super().__init__(self.root/p for p in paths)
+    def __getitem__(self, key):
+        res = super().__getitem__(key)
+        if not isinstance(key, slice): return res
+        res = PathResults(res, self.root, self.show_target)
+        res.stop_reason = self.stop_reason
+        return res
+    def __str__(self): return "\n".join(p.relative_to(self.root).as_posix() for p in self)
+    def _line(self, path):
+        name = path.relative_to(self.root).as_posix()
+        try:
+            st = path.lstat()
+            tgt = f" -> {path.readlink()}" if self.show_target and S_ISLNK(st.st_mode) else ""
+        except OSError: return f"{'?':10} {'?':>7} {'?':16} {name}"
+        mtime = datetime.fromtimestamp(st.st_mtime)
+        return f"{filemode(st.st_mode)} {_hsize(st.st_size):>7} {mtime:%Y-%m-%d %H:%M} {name}{tgt}"
     def __repr__(self):
-        res = [p._line() if isinstance(p, FileEntry) else str(p) for p in self[:MAX_REPR]]
+        res = [self._line(p) for p in self[:MAX_REPR]]
         if len(self) > MAX_REPR: res.append(f"… {len(self)-MAX_REPR:,} more")
         if self.stop_reason is not None: res.append(f"… truncated: {self.stop_reason}")
         return "\n".join(res)
@@ -127,11 +110,11 @@ def walk(
     dirs:bool=False, # Include directories in results
     timeout_ms:int|None=None, # Cancel the walk after this long and return partial results
 ) -> PathResults:
-    "Walk a directory and return relative file and/or directory paths."
-    rt = _fs_path(root)
+    "Walk a directory and return absolute file and/or directory Paths."
+    rt = Path(root).expanduser().absolute()
     paths, timed_out = _core.walk(rt, hidden, ignore, max_depth, min_depth, max_filesize, follow_links,
         same_file_system, path_re, skip_path_re, _listify(skip_dir), skip_dir_re, files, dirs, timeout_ms)
-    return _mk_results(PathResults, _fe(paths, rt), False, timed_out)
+    return _mk_results(PathResults, paths, False, timed_out, root=_path_base(rt, follow_links))
 
 
 def _walk_args(
@@ -166,10 +149,10 @@ def fd(
     timeout_ms:int|None=None, # Cancel the walk after this long and return partial results
     **kwargs
 ) -> PathResults:
-    "Find paths with fd-style filters and gitignore support."
-    rt = _fs_path(root)
+    "Find absolute Paths with fd-style filters and gitignore support."
+    rt = Path(root).expanduser().absolute()
     paths, timed_out = _core.find(rt, pattern, *_walk_args(**kwargs), files, dirs, timeout_ms)
-    return _mk_results(PathResults, _fe(paths, rt, show_target), False, timed_out)
+    return _mk_results(PathResults, paths, False, timed_out, root=_path_base(rt, kwargs.get('follow_links', False)), show_target=show_target)
 
 
 @delegates(_walk_args)
@@ -180,9 +163,10 @@ def fd_iter(
     dirs:bool=False, # Include directories in results
     **kwargs
 ):
-    "Walk lazily, yielding `FileEntry` paths as they are found; early exit stops the walk."
-    rt = _fs_path(root)
-    return _fe(_core.find_iter(rt, pattern, *_walk_args(**kwargs), files, dirs), rt)
+    "Walk lazily, yielding absolute Paths; early exit stops the walk."
+    rt = Path(root).expanduser().absolute()
+    base = _path_base(rt, kwargs.get('follow_links', False))
+    return (base/p for p in _core.find_iter(rt, pattern, *_walk_args(**kwargs), files, dirs))
 
 
 @delegates(fd)
@@ -197,9 +181,8 @@ def ls(
 ) -> PathResults:
     "List a directory like `ls`: one level, directories included, ignore rules off, sorted by name."
     res = fd(root, pattern, hidden=hidden, dirs=dirs, max_depth=max_depth, ignore=ignore, **kwargs)
-    out = PathResults(sorted(res))
-    out.stop_reason = res.stop_reason
-    return out
+    res.sort()
+    return res
 
 async def _acall(fn, *args):
     "Run a `_core` async op: settle a Future from its callback; cancel the op if abandoned"
@@ -228,9 +211,9 @@ async def fda(
     **kwargs
 ) -> PathResults:
     "Async `fd`: find paths on Rust threads without blocking the event loop."
-    rt = _fs_path(root)
+    rt = Path(root).expanduser().absolute()
     paths, timed_out = await _acall(_core.find_async, rt, pattern, *_walk_args(**kwargs), files, dirs, timeout_ms)
-    return _mk_results(PathResults, _fe(paths, rt), False, timed_out)
+    return _mk_results(PathResults, paths, False, timed_out, root=_path_base(rt, kwargs.get('follow_links', False)))
 
 
 @delegates(_walk_args)
@@ -242,12 +225,13 @@ async def fda_iter(
     batch_max:int=512, # Largest batch of paths delivered to the event loop at once
     **kwargs
 ):
-    "Async `fd_iter`: yield `FileEntry` paths as they are found; early exit stops the walk."
-    rt = _fs_path(root)
+    "Async `fd_iter`: yield absolute Paths; early exit stops the walk."
+    rt = Path(root).expanduser().absolute()
+    base = _path_base(rt, kwargs.get('follow_links', False))
     async with aclosing(_abatches(_core.find_iter_async, batch_max, rt, pattern,
         *_walk_args(**kwargs), files, dirs)) as batches:
         async for paths in batches:
-            for p in _fe(paths, rt): yield p
+            for p in paths: yield base/p
 
 
 
@@ -267,8 +251,8 @@ def _cap_rows(rows, n):
     return res, False
 
 
-def _mk_results(cls, items, capped, timed_out):
-    res = cls(items)
+def _mk_results(cls, items, capped, timed_out, **kwargs):
+    res = cls(items, **kwargs)
     if capped: res.stop_reason = "max_results"
     elif timed_out: res.stop_reason = "timeout"
     return res
@@ -276,15 +260,15 @@ def _mk_results(cls, items, capped, timed_out):
 
 def _paths_reduce(rows, root, max_results, timed_out=False):
     "Unique matched paths as `PathResults` from rows with `kind`/`path`, capped at `max_results`"
-    seen,res,capped,er = set(),[],False,_entry_root(root)
+    seen,res,capped = set(),[],False
     for row in rows:
         if row.kind != "match" or row.path in seen: continue
         if max_results is not None and len(res) == max_results:
             capped = True
             break
         seen.add(row.path)
-        res.append(FileEntry(row.path, er))
-    return _mk_results(PathResults, res, capped, timed_out)
+        res.append(row.path)
+    return _mk_results(PathResults, res, capped, timed_out, root=_path_base(Path(root).resolve()))
 
 def _rg_post(rows, paths, count, max_results, timed_out, root):
     "Reduce collected rows to the requested `rg`/`rga` result form"
@@ -324,8 +308,8 @@ def rg(
     if summary:
         rows,timed_out = _core.block_search(*args, timeout_ms)
         return _block_post(rows, max_results, before_context, after_context, timed_out, maxlen, lnhashs)
-    if count: return sum(len(row.matches) for row in _core.rg_iter(*args) if row.kind == "match")
-    if paths and timeout_ms is None: return _paths_reduce(_core.rg_iter(*args), rt, max_results)
+    if count: return sum(len(row.matches) for row in _core.rg_iter(*args, False) if row.kind == "match")
+    if paths and timeout_ms is None: return _paths_reduce(_core.rg_iter(*args, False), rt, max_results)
     rows, timed_out = _core.rg(*args, lnhashs, timeout_ms)
     return _rg_post(rows, paths, False, max_results, timed_out, rt)
 

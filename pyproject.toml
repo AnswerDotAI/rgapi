@@ -43,3 +43,6 @@ cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.rs" }, { file = "C
 
 [tool.fastship]
 branch = "main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

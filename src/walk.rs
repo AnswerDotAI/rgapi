@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use ignore::{DirEntry, WalkBuilder, WalkState};
@@ -30,6 +30,8 @@ pub struct FindOptions {
     pub same_file_system: bool,
     pub files: bool,
     pub dirs: bool,
+    /// Return special entries (FIFOs, sockets, devices) so callers can handle or reject them.
+    pub special_files: bool,
     pub panic_probe: bool,
 }
 
@@ -54,18 +56,20 @@ impl Default for FindOptions {
             same_file_system: false,
             files: true,
             dirs: false,
+            special_files: false,
             panic_probe: false,
         }
     }
 }
 
-pub fn find(opts: &FindOptions) -> Result<Vec<String>, RgApiError> { find_iter(opts)?.collect() }
+pub fn find(opts: &FindOptions) -> Result<Vec<PathBuf>, RgApiError> { find_iter(opts)?.collect() }
 
-pub type FindIter = StreamIter<String>;
+pub type FindIter = StreamIter<PathBuf>;
 
 pub fn find_iter(opts: &FindOptions) -> Result<FindIter, RgApiError> {
     let (ignore, hidden) = file_root_flags(&opts.root, opts.ignore, opts.hidden);
-    let root = normalize_root(&opts.root)?;
+    let root = std::path::absolute(&opts.root)?;
+    let metadata = root.symlink_metadata()?;
     let filters = Arc::new(PathFilters::new(
         &opts.includes,
         &opts.excludes,
@@ -76,7 +80,13 @@ pub fn find_iter(opts: &FindOptions) -> Result<FindIter, RgApiError> {
         opts.skip_dir_re.as_deref(),
     )?);
     let pattern = opts.pattern.as_deref().map(build_fd_re).transpose()?;
-    let (files, dirs, panic_probe, max_depth) = (opts.files, opts.dirs, opts.panic_probe, opts.max_depth);
+    if metadata.is_symlink() && !opts.follow_links {
+        let (tx, rx) = mpsc::sync_channel(1);
+        let rel = relative_path(&root, &root);
+        if opts.min_depth.unwrap_or(0) == 0 && find_matches(rel, &filters, pattern.as_ref()) { let _ = tx.send(Ok(rel.to_path_buf())); }
+        return Ok(StreamIter { rx, cancel: Arc::new(AtomicBool::new(false)), worker: None });
+    }
+    let (files, dirs, special_files, panic_probe, max_depth) = (opts.files, opts.dirs, opts.special_files, opts.panic_probe, opts.max_depth);
     Ok(spawn_walk(
         root,
         ignore,
@@ -89,7 +99,7 @@ pub fn find_iter(opts: &FindOptions) -> Result<FindIter, RgApiError> {
         filters,
         move |dent, root, filters, tx, cancel| {
             if panic_probe { panic!("rgapi: deliberate panic for tests (panic_probe)"); }
-            match find_entry(dent, root, filters, pattern.as_ref(), files, dirs, max_depth) {
+            match find_entry(dent, root, filters, pattern.as_ref(), files, dirs, special_files, max_depth) {
                 Ok(Some(path)) => {
                     if cancel.load(Ordering::Relaxed) || tx.send(Ok(path)).is_err() { return WalkState::Quit; }
                     WalkState::Continue
@@ -118,7 +128,8 @@ impl<T> StreamIter<T> {
     pub fn cancel_and_join(mut self) -> Result<(), RgApiError> {
         self.cancel();
         while self.rx.recv().is_ok() {}
-        self.worker.take().expect("stream owns its worker").join().map_err(|_| RgApiError::new("search worker panicked"))
+        if let Some(worker) = self.worker.take() { worker.join().map_err(|_| RgApiError::new("search worker panicked"))?; }
+        Ok(())
     }
 
     pub fn next_timeout(&mut self, timeout: std::time::Duration) -> Result<Result<T, RgApiError>, mpsc::RecvTimeoutError> { self.rx.recv_timeout(timeout) }
@@ -228,22 +239,25 @@ fn find_entry(
     pattern: Option<&RegexMatcher>,
     files: bool,
     dirs: bool,
+    special_files: bool,
     max_depth: Option<usize>,
-) -> Result<Option<String>, RgApiError> {
+) -> Result<Option<PathBuf>, RgApiError> {
     let dent = match entry { Ok(dent) => dent, Err(err) => return entry_err(err, max_depth).map_or(Ok(None), Err) };
     let path = dent.path();
     let Some(ft) = dent.file_type() else { return Ok(None); };
     if path == root && ft.is_dir() { return Ok(None); }
     if ft.is_file() && !files { return Ok(None); }
     if ft.is_dir() && !dirs { return Ok(None); }
-    if !ft.is_file() && !ft.is_dir() && !ft.is_symlink() { return Ok(None); }
-    let rel = rel_path(root, path);
+    if !ft.is_file() && !ft.is_dir() && !ft.is_symlink() && !special_files { return Ok(None); }
+    let rel = relative_path(root, path);
+    Ok(find_matches(rel, filters, pattern).then(|| rel.to_path_buf()))
+}
+
+fn find_matches(path: &Path, filters: &PathFilters, pattern: Option<&RegexMatcher>) -> bool {
     if let Some(pattern) = pattern {
-        let name = dent.file_name().to_string_lossy();
-        if !re_match(pattern, &name) { return Ok(None); }
+        if !re_match(pattern, &path.file_name().unwrap_or_default().to_string_lossy()) { return false; }
     }
-    if !filters.path_allowed(&rel) { return Ok(None); }
-    Ok(Some(rel))
+    filters.path_allowed(path)
 }
 
 // An explicitly named file is always searched, like `rg FILE`: for a file root,
@@ -264,14 +278,14 @@ pub(crate) fn normalize_root(path: &Path) -> Result<PathBuf, RgApiError> {
     if path.exists() { Ok(path.canonicalize()?) } else { Err(RgApiError::new(format!("root does not exist: {}", path.display()))) }
 }
 
-pub(crate) fn rel_path(root: &Path, path: &Path) -> String {
+fn relative_path<'a>(root: &Path, path: &'a Path) -> &'a Path {
     let rel = path.strip_prefix(root).unwrap_or(path);
-    if rel.as_os_str().is_empty() {
-        // A file root strips to nothing: report its name, matching the old parent-walk output.
-        return path.file_name().map_or_else(String::new, |n| n.to_string_lossy().replace('\\', "/"));
-    }
-    rel.to_string_lossy().replace('\\', "/")
+    if rel.as_os_str().is_empty() { Path::new(path.file_name().unwrap_or_default()) } else { rel }
 }
+
+fn path_label(path: &Path) -> String { path.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/") }
+
+pub(crate) fn rel_path(root: &Path, path: &Path) -> String { path_label(relative_path(root, path)) }
 
 pub(crate) fn configure_walker(
     walker: &mut WalkBuilder,
@@ -330,16 +344,15 @@ impl PathFilters {
         })
     }
 
-    pub(crate) fn path_allowed(&self, rel: &str) -> bool {
-        let path = Path::new(rel);
+    pub(crate) fn path_allowed(&self, path: &Path) -> bool {
         if let Some(excludes) = &self.excludes
             && excludes.is_match(path)
         { return false; }
         if let Some(skip_path_re) = &self.skip_path_re
-            && re_match(skip_path_re, rel)
+            && re_match(skip_path_re, &path_label(path))
         { return false; }
         if let Some(path_re) = &self.path_re
-            && !re_match(path_re, rel)
+            && !re_match(path_re, &path_label(path))
         { return false; }
         if let Some(exts) = &self.exts
             && !exts.is_match(path)
@@ -353,12 +366,13 @@ impl PathFilters {
         if path == root { return true; }
         let Some(ft) = dent.file_type() else { return true; };
         if !ft.is_dir() { return true; }
-        let rel = rel_path(root, path);
+        let rel = relative_path(root, path);
+        if self.excludes.as_ref().is_some_and(|globs| globs.is_match(rel)) { return false; }
         if let Some(skip_dirs) = &self.skip_dirs
-            && skip_dirs.is_match(Path::new(&rel))
+            && skip_dirs.is_match(rel)
         { return false; }
         if let Some(skip_dir_re) = &self.skip_dir_re
-            && re_match(skip_dir_re, &rel)
+            && re_match(skip_dir_re, &path_label(rel))
         { return false; }
         true
     }
@@ -372,8 +386,8 @@ pub(crate) fn build_globs(globs: &[String]) -> Result<Option<GlobSet>, RgApiErro
 }
 
 fn add_glob(builder: &mut GlobSetBuilder, glob: &str) -> Result<(), RgApiError> {
-    builder.add(Glob::new(glob).map_err(|e| RgApiError::new(e.to_string()))?);
-    if !glob.contains('/') && !glob.contains('\\') { builder.add(Glob::new(&format!("**/{glob}")).map_err(|e| RgApiError::new(e.to_string()))?); }
+    let pattern = if glob.contains('/') { glob.to_owned() } else { format!("**/{glob}") };
+    builder.add(GlobBuilder::new(&pattern).literal_separator(true).build().map_err(|e| RgApiError::new(e.to_string()))?);
     Ok(())
 }
 
@@ -392,6 +406,16 @@ fn re_match(matcher: &RegexMatcher, rel: &str) -> bool { matcher.is_match(rel.as
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn globs_match_names_or_root_relative_components() {
+        for (glob, yes, no) in [("*.py", "src/deep/app.py", "src/app.rs"), ("src/*", "src/app.py", "src/deep/app.py"),
+            ("src/**", "src/deep/app.py", "other/src/app.py"), ("tests", "src/tests", "src/tests/app.py")] {
+            let globs = build_globs(&[glob.into()]).unwrap().unwrap();
+            assert!(globs.is_match(yes), "{glob}: {yes}");
+            assert!(!globs.is_match(no), "{glob}: {no}");
+        }
+    }
 
     fn iter_of(items: Vec<u32>, delay_ms: u64) -> StreamIter<u32> {
         let (tx, rx) = mpsc::channel();

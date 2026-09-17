@@ -146,7 +146,7 @@ fn search_entry(
     let Some(ft) = dent.file_type() else { return WalkState::Continue; };
     if !ft.is_file() { return WalkState::Continue; }
     let rel = rel_path(root, path);
-    if !filters.path_allowed(&rel) { return WalkState::Continue; }
+    if !filters.path_allowed(Path::new(&rel)) { return WalkState::Continue; }
     match search_path_cancelable(path, rel, matcher.clone(), before_context, after_context, Some(cancel.clone())) {
         Ok(lines) => {
             if is_cancelled(cancel) { return WalkState::Quit; }

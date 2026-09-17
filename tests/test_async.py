@@ -1,10 +1,11 @@
 import asyncio, time
 from contextlib import aclosing
+from pathlib import Path
 
 import pytest
 from fastcore.aio import run_sync
 
-from rgapi import FileEntry, PathResults, fd, fda, fda_iter, rg, rga, rga_iter
+from rgapi import PathResults, fd, fda, fda_iter, rg, rga, rga_iter
 from test_rgapi import make_tree
 
 
@@ -18,7 +19,7 @@ def _more(tmp_path):
 def test_async_results_match_sync(tmp_path):
     _more(tmp_path)
     found = run_sync(fda(tmp_path))
-    assert type(found) is PathResults and type(found[0]) is FileEntry and sorted(found) == sorted(fd(tmp_path))
+    assert type(found) is PathResults and isinstance(found[0], Path) and sorted(found) == sorted(fd(tmp_path))
     assert sorted(run_sync(fda(tmp_path, glob="*.py"))) == sorted(fd(tmp_path, glob="*.py"))
     assert run_sync(fda(tmp_path, timeout_ms=0)).stop_reason == "timeout"
     assert srt(run_sync(rga("TODO", tmp_path))) == srt(rg("TODO", tmp_path))
@@ -64,7 +65,7 @@ def test_fda_iter(tmp_path):
     _more(tmp_path)
     async def all_paths(): return [p async for p in fda_iter(tmp_path)]
     got = sorted(run_sync(all_paths()))
-    assert got == sorted(fd(tmp_path)) and type(got[0]) is FileEntry
+    assert got == sorted(fd(tmp_path)) and isinstance(got[0], Path)
     async def first_then_close():
         async with aclosing(fda_iter(tmp_path)) as it:
             async for p in it: return p
@@ -78,7 +79,7 @@ def test_nbrga_paths(tmp_path):
     write_nb(tmp_path / "b.ipynb", [_cell("code", "foo = 2\n")])
     res = run_sync(nbrga("foo", tmp_path, paths=True))
     assert type(res) is PathResults
-    assert sorted(res) == sorted(nbrg("foo", tmp_path, paths=True)) == ["a.ipynb", "b.ipynb"]
+    assert sorted(res) == sorted(nbrg("foo", tmp_path, paths=True)) == [tmp_path/"a.ipynb", tmp_path/"b.ipynb"]
 
 
 def test_cancellation_no_hang(tmp_path):

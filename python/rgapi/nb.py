@@ -63,7 +63,7 @@ def search_nb(
     "Search one `.ipynb` file's cell sources, returning matched cells."
     disp = _display_path(path if display_path is None else display_path)
     rows = _core.nb_search_file(pattern, _fs_path(path), disp, case_sensitive=case_sensitive,
-        smart_case=smart_case, cell_context=cell_context)
+        smart_case=smart_case, cell_context=cell_context, multiline=False)
     res = NbResults(_rows_to_cells(rows, maxlen))
     res.sort(key=lambda c: c.cell_index)
     return res

@@ -56,17 +56,17 @@ pip install rgapi
 
 ## File discovery
 
-`fd` and `walk` return slash-separated paths relative to `root`. Pass `root` as a `str` or `pathlib.Path`. The sync and async APIs expand `~` and accept `.`, `./`, and paths containing `..`.
+`fd` and `walk` return absolute `pathlib.Path` objects. Use them directly with `.read_text()`, `.open()`, `.stat()`, or other filesystem operations. Their collected results display names relative to `root`. Pass `root` as a `str` or `Path`. The sync and async APIs expand `~` and accept `.`, `./`, and paths containing `..`.
 
 Discovery uses the `ignore` crate with ripgrep's default filters. It reads `.gitignore`, `.ignore`, and `.rgignore` files. `.rgignore` takes precedence over `.gitignore`. Pass `ignore=False` to disable all ignore-file filtering, including `.rgignore`.
 
-Hidden files are skipped unless `hidden=True`. Symlinks are followed only with `follow_links=True`. Use `same_file_system=True` to avoid crossing filesystem boundaries.
+Hidden files are skipped unless `hidden=True`. Discovery returns symlinks themselves, including explicitly named roots and dangling links. Set `follow_links=True` to traverse their targets. Paths retain the symlink spelling. Use `same_file_system=True` to avoid crossing filesystem boundaries.
 
 Traversal runs in parallel without guaranteed result order. Use `sorted(...)` when order matters.
 
 `fd` adds filename filters to `walk`. Its `pattern` is a smart-case regex matched against each basename. Lowercase patterns match case-insensitively. A pattern containing uppercase letters is case-sensitive. Use `path_re` to match the slash-separated relative path instead.
 
-`include` and `exclude` use glob syntax. `glob=` is an alias for `include=`. A basename glob such as `*.py` also matches nested paths such as `src/app.py`.
+`include` and `exclude` use case-sensitive glob syntax. `glob=` is an alias for `include=`. Patterns without `/` match names at any depth, so `*.py` matches `src/app.py`. Patterns containing `/` are root-relative. `*` stays within a path component; `**` spans directories: `src/*` matches immediate children, whereas `src/**` also matches deeper descendants. Matching a directory with `exclude` prunes its entire subtree. Includes never prune traversal. Excludes always win, and includes do not override ignore rules.
 
 Filter extensions with `ext="py"` or `ext=["py", "rs"]`. Extension and glob filters must both match. For example, `include="src/*", ext="py"` requires `src/*` and `*.py`, like combining `rg -g` with `-t`.
 
@@ -74,7 +74,7 @@ Set `min_depth` and `max_depth` to bound recursion. `max_filesize` skips files a
 
 `ls` follows the shell command's listing conventions. It uses `fd` with `max_depth=1`, includes directories, disables ignore rules, and sorts by name. Set `hidden=True` for `ls -a` behaviour. All `fd` filters remain available.
 
-`fd_iter` yields `FileEntry` paths as the walk finds them. It accepts every `fd` filter. Stopping iteration ends the walk. It does not accept `timeout_ms`.
+`fd_iter` yields absolute `Path` objects as the walk finds them. It accepts every `fd` filter. Stopping iteration ends the walk. It does not accept `timeout_ms`.
 
 `path_re` and `skip_path_re` filter slash-separated relative paths using regexes. They select returned paths or searched files without changing traversal. To skip entire subtrees, use `skip_dir` with a glob or `skip_dir_re` with a regex.
 
@@ -105,11 +105,23 @@ For other result forms, use `rg(..., paths=True)` to return unique matched paths
 
 ### Path results
 
-`fd`, `walk`, and `ls` return `PathResults`. So do `rg` and `nbrg` with `paths=True`. This is a list of `FileEntry` rows.
+`fd`, `walk`, and `ls` return `PathResults`, a list of absolute `Path` objects. So do `rg` and `nbrg` with `paths=True`, and their async equivalents. Indexing or iterating returns ordinary Paths:
 
-A `FileEntry` is a `str` subclass containing a relative path. Its `stat` property calls `os.lstat` on first access and caches the result. It returns `None` if the path has vanished. `size`, `mtime`, and `is_dir` use the cached stat result. The object also supports ordinary string operations.
+```python
+for path in fd("src", ext="py"):
+    text = path.read_text()
+    size = path.stat().st_size
+```
 
-`PathResults` displays as an `ls -l`-style listing of at most `rgapi.MAX_REPR` rows. A final `… N more` line reports omitted rows. Only displayed rows need stat calls. `str()` returns one plain path per line. `list(res)` also displays plain paths.
+Use `.name`, `.suffix`, and `.relative_to(root)` for path components. `.stat()` follows symlinks; `.lstat()` inspects the link itself. `.readlink()` returns a link's target. Discovery preserves native filenames, including literal backslashes on Unix and non-UTF-8 names on filesystems that support them.
+
+`PathResults` displays as an `ls -l`-style listing of at most `rgapi.MAX_REPR` rows. A final `… N more` line reports omitted rows. The listing uses `.lstat()` only on displayed rows. `show_target=True` adds symlink targets. `str(res)` returns one root-relative name per line. Slices retain the display root and completion status. `list(res)` returns the absolute Paths without the custom display.
+
+Structured text and notebook search rows retain root-relative string labels in their `path` fields. Content searches still follow explicitly named root links. This differs from discovery's default of returning the link itself.
+
+The Rust `find` and `find_iter` APIs return native `PathBuf` values relative to the root. For an explicitly named file or unfollowed root link, the result is its basename.
+
+Rust callers can set `FindOptions::special_files` to also discover FIFOs, sockets, and device nodes, for example to reject unsupported entries during archiving. This defaults to false; normal discovery returns regular files, directories when requested, and symlinks.
 
 ### Limits and timeouts
 

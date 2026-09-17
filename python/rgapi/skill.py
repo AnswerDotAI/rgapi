@@ -12,9 +12,11 @@ For orientation, start with `rg(summary=True)`; use line-level results where nee
 
 ## Result fields and display
 
-`FileEntry` is a slash-separated relative-path `str` with lazy `size`/`mtime`/`is_dir`/`stat`. Path lists render as ls-style tables capped at `MAX_REPR`; `str(res)`/`list(res)` yield plain paths. Unfollowed symlinks remain, marked `l`; `link_target` is their target or `None` for non-links. `ls(hidden=True)` corresponds to `ls -a`.
+Discovery and `paths=True` results contain absolute `pathlib.Path` objects. Use them directly: `p.read_text()`, `p.name`, `p.stat().st_size`, `p.stat().st_mtime`, and `p.is_dir()`. `.stat()` follows links; `.lstat()` inspects the link itself. Discovery returns symlinks themselves, including root links and dangling links, unless `follow_links=True`. `.readlink()` returns a link's target. `ls(hidden=True)` corresponds to `ls -a`.
 
-Search rows provide `asdict()`. All paths are relative to the search root:
+`PathResults` displays root-relative names in ls-style tables capped at `MAX_REPR`. `str(res)` returns one relative name per line; `list(res)` contains absolute Paths. Slices retain the display root and completion status. `show_target=True` appends link targets in the listing.
+
+Search rows provide `asdict()`. Their `path` fields remain root-relative string labels. Content searches follow explicitly named root links:
 
 | Row | Location | Content/matches | `kind` |
 |---|---|---|---|

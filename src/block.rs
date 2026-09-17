@@ -97,7 +97,7 @@ fn block_entry(
     let Some(ft) = dent.file_type() else { return Ok(Vec::new()); };
     if !ft.is_file() { return Ok(Vec::new()); }
     let rel = rel_path(root, path);
-    if !filters.path_allowed(&rel) { return Ok(Vec::new()); }
+    if !filters.path_allowed(Path::new(&rel)) { return Ok(Vec::new()); }
     let bytes = match std::fs::read(path) { Ok(bytes) => bytes, Err(_) => return Ok(Vec::new()) };
     process_file(rel, &bytes, matcher, before_context, after_context)
 }
