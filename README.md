@@ -147,7 +147,7 @@ rg("TODO", ".", summary=True, context=1, maxlen=120)
 
 The result is `BlockResults`, a list of `SearchBlock` objects. Each block has `path`, `block_index`, `start_line`, `end_line`, `start_lnhash`, `end_lnhash`, `kind`, full `source`, and `matches`.
 
-Matches display as `path:start-end:source`. Context displays as `path:start-end-source`. With `lnhashs=True`, the range uses copyable boundary addresses such as `path:4|a3f2|,6|b1c3|:source`. Newline runs display as `¶`. `maxlen` limits the displayed text without changing `source` or `asdict()`.
+Matches display as `path:start-end:source`. Context displays as `path:start-end-source`. With `lnhashs=True`, the range uses copyable boundary addresses such as `path:4|Py|,6|HD|:source`. Newline runs display as `¶`. `maxlen` limits the displayed text without changing `source` or `asdict()`.
 
 In summary mode, `before_context`, `after_context`, and `context` count neighbouring blocks. `max_results` counts matching blocks and retains their context. `summary=True` cannot be combined with `paths` or `count`. It can be combined with `lnhash` for copyable block boundaries.
 

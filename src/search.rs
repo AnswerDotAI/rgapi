@@ -185,9 +185,11 @@ pub fn compile_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: bo
     builder.build(pattern).map_err(|e| RgApiError::new(e.to_string()))
 }
 
-fn line_hash_u16(line: &str) -> u16 { (crc32fast::hash(line.as_bytes()) & 0xffff) as u16 }
-
-pub(crate) fn format_lnhash(lineno: u64, line: &str) -> String { format!("{}|{:04x}|", lineno, line_hash_u16(line)) }
+pub(crate) fn format_lnhash(lineno: u64, line: &str) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let hash = crc32fast::hash(line.as_bytes()) as usize;
+    format!("{}|{}{}|", lineno, ALPHABET[(hash >> 6) & 63] as char, ALPHABET[hash & 63] as char)
+}
 
 pub fn search_path(
     path: &Path,

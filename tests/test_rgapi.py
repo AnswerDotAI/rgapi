@@ -185,11 +185,11 @@ def test_depth_size_and_filesystem_options(tmp_path):
     assert [r.path for r in rg("TODO", str(tmp_path), min_depth=2, max_filesize=5)] == ["sub/small.txt"]
 
 
-def test_lnhash_matches_stdlib_crc32(tmp_path):
-    import zlib
+def test_lnhash_matches_fastcore(tmp_path):
+    from fastcore.tools import lnhash as py_hash
     make_tree(tmp_path)
-    row = rg("TODO", str(tmp_path))[0]
-    assert row.lnhash == f"{row.line_number}|{zlib.crc32(row.line.encode()) & 0xffff:04x}|"
+    for row in rg(".", str(tmp_path)):
+        assert row.lnhash == py_hash(row.line_number, row.line)
 
 
 def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
@@ -214,8 +214,8 @@ def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
     except AssertionError as e: assert "mutually exclusive" in str(e)
     else: assert False
     addr = res[1].lnhash.split("|")
-    assert addr[0] == "2" and len(addr[1]) == 4 and addr[2:] == [""]
-    assert int(addr[1], 16) >= 0
+    assert addr[0] == "2" and len(addr[1]) == 2 and addr[2:] == [""]
+    assert all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_' for c in addr[1])
     expected = (f'SearchLine(kind="match", path="src/app.py", line_number=2, lnhash="{res[1].lnhash}", '
         'line="TODO here", matches=[(0, 4)])')
     assert repr(res[1]) == expected
