@@ -103,6 +103,8 @@ Pass `lnhashs=True` to `rg` or `rg_iter` to display hash addresses instead of li
 
 For other result forms, use `rg(..., paths=True)` to return unique matched paths or `rg(..., count=True)` to count match spans. `paths` and `count` cannot both be set.
 
+`^` and `$` match at the start and end of each line. A line ends at `\n` or `\r\n`. `$` also matches before a `\r` that has no `\n` after it. `rg`, `rgstr`, and `nbrg` without `multiline=True` raise `ValueError` for a pattern that contains a literal `\n` or `\r`.
+
 ### Path results
 
 `fd`, `walk`, and `ls` return `PathResults`, a list of absolute `Path` objects. So do `rg` and `nbrg` with `paths=True`, and their async equivalents. Indexing or iterating returns ordinary Paths:

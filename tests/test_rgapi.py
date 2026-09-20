@@ -188,8 +188,7 @@ def test_depth_size_and_filesystem_options(tmp_path):
 def test_lnhash_matches_fastcore(tmp_path):
     from fastcore.tools import lnhash as py_hash
     make_tree(tmp_path)
-    for row in rg(".", str(tmp_path)):
-        assert row.lnhash == py_hash(row.line_number, row.line)
+    for row in rg(".", str(tmp_path)): assert row.lnhash == py_hash(row.line_number, row.line)
 
 
 def test_rg_returns_structured_matches_context_and_relative_paths(tmp_path):
@@ -662,3 +661,13 @@ def test_nbrg_multiline(tmp_path):
     m, = res[0].matches
     assert m.line_number == 1 and "export" in m.line and "import" in m.line
     assert nbrg(r"^import", str(tmp_path), multiline=True, count=True) == 2   # ^ still means line start
+
+
+def test_line_anchor_spans(tmp_path):
+    "`$` anchors at line end in match spans, for LF and CRLF lines. `count=True` sums those spans."
+    (tmp_path/"a.txt").write_text("foo\nbar foo\nfoo bar\nlast foo")
+    assert sorted((r.line_number, r.matches) for r in rg(r"foo$", tmp_path)) == [(1, [(0, 3)]), (2, [(4, 7)]), (4, [(5, 8)])]
+    assert rg(r"foo$", tmp_path, count=True) == 3
+    assert [r.matches for r in rgstr(r"foo$", "foo\nbar foo")] == [[(0, 3)], [(4, 7)]]
+    (tmp_path/"crlf.txt").write_bytes(b"foo\r\nbar foo\r\n")
+    assert sorted((r.line_number, r.line, r.matches) for r in rg(r"foo$", tmp_path/"crlf.txt")) == [(1, "foo", [(0, 3)]), (2, "bar foo", [(4, 7)])]

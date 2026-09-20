@@ -5,7 +5,7 @@ use std::sync::{
     mpsc::SyncSender,
 };
 
-use grep_matcher::Matcher;
+use grep_matcher::{LineTerminator, Matcher};
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::{BinaryDetection, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkError, SinkMatch};
 use ignore::{DirEntry, WalkState};
@@ -167,8 +167,8 @@ fn send_search_error(tx: &SyncSender<Result<SearchLine, RgApiError>>, err: RgApi
 pub fn compile_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: bool, multiline: bool) -> Result<RegexMatcher, RgApiError> {
     if pattern.is_empty() { return Err(RgApiError::new("pattern may not be empty")); }
     let mut builder = RegexMatcherBuilder::new();
-    if multiline { builder.multi_line(true); }
-    else { builder.line_terminator(Some(b'\n')); }
+    builder.multi_line(true).crlf(true);
+    if multiline { builder.line_terminator(None); }
     match case_sensitive {
         Some(true) => {
             builder.case_insensitive(false);
@@ -208,7 +208,7 @@ fn search_path_cancelable(
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<Vec<SearchLine>, RgApiError> {
     let mut builder = SearcherBuilder::new();
-    builder.line_number(true).before_context(before_context).after_context(after_context).binary_detection(BinaryDetection::quit(0));
+    builder.line_number(true).line_terminator(LineTerminator::crlf()).before_context(before_context).after_context(after_context).binary_detection(BinaryDetection::quit(0));
     let mut searcher = builder.build();
     let mut out = Vec::new();
     let search_matcher = matcher.clone();
@@ -236,7 +236,7 @@ fn search_bytes(
     multiline: bool,
 ) -> Result<Vec<SearchLine>, RgApiError> {
     let mut builder = SearcherBuilder::new();
-    builder.line_number(true).before_context(before_context).after_context(after_context).multi_line(multiline);
+    builder.line_number(true).line_terminator(LineTerminator::crlf()).before_context(before_context).after_context(after_context).multi_line(multiline);
     let mut searcher = builder.build();
     let mut out = Vec::new();
     let search_matcher = matcher.clone();

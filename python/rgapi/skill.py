@@ -6,8 +6,8 @@ For orientation, start with `rg(summary=True)`; use line-level results where nee
 
 ## Search units
 
-- `rg`: lines, or `SearchBlock` rows with `summary=True`. Blank/whitespace-only lines separate blocks; multiple matches in one block yield one row. Context counts the selected unit. Summary mode cannot combine with `paths` or `count`, but supports hashed block boundaries.
-- `nbrg`: `NbResults` of `NbCell` rows from source only, never metadata/outputs. `multiline=True` matches across cell lines while `^`/`$` remain line anchors; ordinary line-oriented `rg` rejects newline patterns.
+- `rg`: lines, or `SearchBlock` rows with `summary=True`. Blank/whitespace-only lines separate blocks; multiple matches in one block yield one row. Context counts the selected unit. Summary mode cannot combine with `paths` or `count`, but supports hashed block boundaries. `^`/`$` anchor each line. A line ends at LF or CRLF.
+- `nbrg`: `NbResults` of `NbCell` rows from source only, never metadata/outputs. `multiline=True` matches across cell lines while `^`/`$` remain line anchors; ordinary line-oriented `rg` rejects patterns containing a newline or carriage return.
 - Traversal/search run in parallel in Rust; sort when stable order is required. `path_re`/`skip_path_re` filter paths without pruning; `skip_dir`/`skip_dir_re` prune subtrees.
 
 ## Result fields and display
