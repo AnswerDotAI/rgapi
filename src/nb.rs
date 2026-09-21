@@ -42,9 +42,9 @@ pub fn ancestor_indices(levels: &[usize], idx: usize) -> Vec<usize> {
     parents
 }
 
-/// Group 1 of every `` sigil`body` `` match in `text`, in order of appearance.
-fn sigil_caps(text: &str, sigil: char, body: &str) -> Vec<String> {
-    let re = RegexMatcher::new(&format!(r"\x{{{:x}}}`({body})`", sigil as u32)).expect("sigil pattern compiles");
+/// Group 1 of every `` sigil`body` `` match in `text`, in order of appearance. `sigil` and `body` are regex fragments.
+fn sigil_caps(text: &str, sigil: &str, body: &str) -> Vec<String> {
+    let re = RegexMatcher::new(&format!("{sigil}`({body})`")).expect("sigil pattern compiles");
     let mut caps = re.new_captures().expect("captures allocate");
     let mut res = Vec::new();
     re.captures_iter(text.as_bytes(), &mut caps, |c| {
@@ -54,13 +54,42 @@ fn sigil_caps(text: &str, sigil: char, body: &str) -> Vec<String> {
     res
 }
 
-/// Expressions referenced as `` sigil`expr` `` in `text`, in order of appearance.
-pub fn sigil_exprs(text: &str, sigil: char) -> Vec<String> { sigil_caps(text, sigil, "[^`]+") }
-
-/// Names referenced as `` sigil`name` `` or `` sigil`[a, b]` `` in `text`, in order of appearance.
-pub fn sigil_names(text: &str, sigil: char) -> Vec<String> {
-    let groups = sigil_caps(text, sigil, r"[\w.]+|\[[\w.,\s]+\]");
+/// Names written as `` &`name` `` or `` &`[a, b]` `` in `text`. A name holds word characters and dots.
+fn tool_names(text: &str) -> Vec<String> {
+    let groups = sigil_caps(text, "&", r"[\w.]+|\[[\w.,\s]+\]");
     groups.iter().flat_map(|g| g.split(['[', ']', ','])).map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect()
+}
+
+/// nbformat multiline text, a string or a list of strings, as one string.
+fn nb_text(v: &serde_json::Value) -> String {
+    match v { serde_json::Value::String(s) => s.clone(), serde_json::Value::Array(a) => a.iter().filter_map(|o| o.as_str()).collect(), _ => String::new() }
+}
+
+/// The sigil references in one notebook cell, in order of appearance.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct CellRefs {
+    /// Each `expr` written as `` $`expr` ``
+    pub vars: Vec<String>,
+    /// Each `cmd` written as `` !`cmd` ``
+    pub cmds: Vec<String>,
+    /// Each name written as `` &`name` `` or `` &`[a, b]` ``
+    pub tools: Vec<String>,
+}
+
+/// The sigil references in `cell`, an nbformat cell. A prompt cell has `solveit_ai: true` in its metadata.
+/// `vars` and `cmds` come from a prompt cell's source. `tools` comes from the source of a prompt or Markdown cell.
+/// For every other cell, `tools` comes from the `text/markdown` data of its `display_data` and `execute_result` outputs.
+/// A prompt cell's outputs are never read.
+pub fn cell_refs(cell: &serde_json::Value) -> CellRefs {
+    let src = nb_text(&cell["source"]);
+    let prompt = cell["metadata"]["solveit_ai"] == true;
+    let mut res = CellRefs::default();
+    if prompt { (res.vars, res.cmds) = (sigil_caps(&src, r"\$", "[^`]+"), sigil_caps(&src, "!", "[^`]+")); }
+    if prompt || cell["cell_type"] == "markdown" { res.tools = tool_names(&src); return res; }
+    for o in cell["outputs"].as_array().into_iter().flatten() {
+        if matches!(o["output_type"].as_str(), Some("display_data" | "execute_result")) { res.tools.extend(tool_names(&nb_text(&o["data"]["text/markdown"]))); }
+    }
+    res
 }
 
 #[derive(Debug, Clone)]
