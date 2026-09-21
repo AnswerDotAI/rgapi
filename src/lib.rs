@@ -9,7 +9,7 @@ mod walk;
 mod python;
 
 pub use block::{BlockIter, SearchBlock, block_iter};
-pub use nb::{NbCell, NbIter, NbOptions, ancestor_indices, heading_level, nb_iter, nb_search, nb_search_file, section_range};
+pub use nb::{NbCell, NbIter, NbOptions, ancestor_indices, heading_level, nb_iter, nb_search, nb_search_file, section_range, sigil_exprs, sigil_names};
 pub use search::{MatchSpan, RgIter, RgOptions, SearchKind, SearchLine, compile_regex, rg, rg_iter, search_path, search_text};
 pub use walk::{FindIter, FindOptions, StreamIter, find, find_iter};
 

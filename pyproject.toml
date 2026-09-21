@@ -1,12 +1,12 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
+requires = ["maturin>=1.9.2,<2.0"]
 build-backend = "maturin"
 
 [project]
 name = "rgapi"
 dynamic = ["version"]
 description = "Python API for ripgrep-style file walking and searching"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
 requires-python = ">=3.10"
 readme = "README.md"
 authors = [{name = "Jeremy Howard", email = "j@fast.ai"}]

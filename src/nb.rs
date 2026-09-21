@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 use std::sync::atomic::Ordering;
 
-use grep_matcher::Matcher;
+use grep_matcher::{Captures, Matcher};
 use grep_regex::RegexMatcher;
 use ignore::{DirEntry, WalkState};
 use serde::Deserialize;
@@ -40,6 +40,27 @@ pub fn ancestor_indices(levels: &[usize], idx: usize) -> Vec<usize> {
     }
     parents.reverse();
     parents
+}
+
+/// Group 1 of every `` sigil`body` `` match in `text`, in order of appearance.
+fn sigil_caps(text: &str, sigil: char, body: &str) -> Vec<String> {
+    let re = RegexMatcher::new(&format!(r"\x{{{:x}}}`({body})`", sigil as u32)).expect("sigil pattern compiles");
+    let mut caps = re.new_captures().expect("captures allocate");
+    let mut res = Vec::new();
+    re.captures_iter(text.as_bytes(), &mut caps, |c| {
+        if let Some(m) = c.get(1) { res.push(text[m.start()..m.end()].to_string()); }
+        true
+    }).expect("regex search is infallible");
+    res
+}
+
+/// Expressions referenced as `` sigil`expr` `` in `text`, in order of appearance.
+pub fn sigil_exprs(text: &str, sigil: char) -> Vec<String> { sigil_caps(text, sigil, "[^`]+") }
+
+/// Names referenced as `` sigil`name` `` or `` sigil`[a, b]` `` in `text`, in order of appearance.
+pub fn sigil_names(text: &str, sigil: char) -> Vec<String> {
+    let groups = sigil_caps(text, sigil, r"[\w.]+|\[[\w.,\s]+\]");
+    groups.iter().flat_map(|g| g.split(['[', ']', ','])).map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect()
 }
 
 #[derive(Debug, Clone)]
