@@ -15,6 +15,7 @@ fd(".", ext="py", exclude="test_*.py")
 ls("src")
 for row in rg_iter("TODO", ".", include="*.py", context=2): print(row.asdict())
 rg("TODO", ".", ext="py", skip_dir=".venv", paths=True)
+rg("TODO", ["src", "tests"], ext="py")
 ```
 
 For cell-aware search of Jupyter notebooks (see [Notebooks](#notebooks)):
@@ -56,7 +57,9 @@ pip install rgapi
 
 ## File discovery
 
-`fd` and `walk` return absolute `pathlib.Path` objects. Use them directly with `.read_text()`, `.open()`, `.stat()`, or other filesystem operations. Their collected results display names relative to `root`. Pass `root` as a `str` or `Path`. The sync and async APIs expand `~` and accept `.`, `./`, and paths containing `..`.
+`fd` and `walk` return absolute `pathlib.Path` objects. Use them directly with `.read_text()`, `.open()`, `.stat()`, or other filesystem operations. Their collected results display names relative to `root`. Pass `root` as a `str` or `Path`, or as a list of them. The sync and async APIs expand `~` and accept `.`, `./`, and paths containing `..`.
+
+A list of roots, such as `rg("TODO", ["src", "tests"])`, works with every walk and search function. The roots are searched as one walk that returns one result list. `timeout_ms` and `max_results` apply to the whole walk. Result paths are relative to the common ancestor of the roots. For example, rows read `src/app.py` and `tests/test_app.py`. `PathResults` displays use the same relative paths. Filters such as `include`, `path_re` and `skip_dir` match these relative paths. A file under more than one root, such as `src/app.py` with roots `[".", "src"]`, appears once.
 
 Discovery uses the `ignore` crate with ripgrep's default filters. It reads `.gitignore`, `.ignore`, and `.rgignore` files. `.rgignore` takes precedence over `.gitignore`. Pass `ignore=False` to disable all ignore-file filtering, including `.rgignore`.
 
@@ -121,7 +124,7 @@ Use `.name`, `.suffix`, and `.relative_to(root)` for path components. `.stat()` 
 
 Structured text and notebook search rows retain root-relative string labels in their `path` fields. Content searches still follow explicitly named root links. This differs from discovery's default of returning the link itself.
 
-The Rust `find` and `find_iter` APIs return native `PathBuf` values relative to the root. For an explicitly named file or unfollowed root link, the result is its basename.
+The Rust `find` and `find_iter` APIs return native `PathBuf` values relative to the root, or to the common ancestor of several roots in `WalkOptions::roots`. For an explicitly named file or unfollowed root link, the result is its basename.
 
 Rust callers can set `FindOptions::special_files` to also discover FIFOs, sockets, and device nodes, for example to reject unsupported entries during archiving. This defaults to false; normal discovery returns regular files, directories when requested, and symlinks.
 
@@ -203,6 +206,7 @@ The parser reads only each cell's `id`, `cell_type`, and `source`. It skips outp
 ```bash
 rgapi-nbrg 'read_csv' .
 rgapi-nbrg 'read_csv' . --cell-context 1
+rgapi-nbrg 'read_csv' nbs tests
 rgapi-nbrg 'read_csv' nbs --glob '*.ipynb' --max-results 20
 ```
 

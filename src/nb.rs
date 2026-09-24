@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use std::sync::atomic::Ordering;
 
@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::RgApiError;
 use crate::search::{SearchLine, compile_regex, search_text};
-use crate::walk::{PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk};
+use crate::walk::{PathFilters, StreamIter, WalkOptions, entry_err, rel_path, resolve_roots, spawn_walk};
 
 static HEADING_RE: LazyLock<RegexMatcher> = LazyLock::new(|| RegexMatcher::new(r"^#{1,6} \w").unwrap());
 
@@ -92,24 +92,10 @@ pub fn cell_refs(cell: &serde_json::Value) -> CellRefs {
     res
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NbOptions {
-    pub root: PathBuf,
+    pub walk: WalkOptions,
     pub pattern: String,
-    pub includes: Vec<String>,
-    pub excludes: Vec<String>,
-    pub exts: Vec<String>,
-    pub path_re: Option<String>,
-    pub skip_path_re: Option<String>,
-    pub skip_dirs: Vec<String>,
-    pub skip_dir_re: Option<String>,
-    pub hidden: bool,
-    pub ignore: bool,
-    pub max_depth: Option<usize>,
-    pub min_depth: Option<usize>,
-    pub max_filesize: Option<u64>,
-    pub follow_links: bool,
-    pub same_file_system: bool,
     pub case_sensitive: Option<bool>,
     pub smart_case: bool,
     pub cell_context: usize,
@@ -212,7 +198,7 @@ pub fn nb_search_file(
 
 fn nb_entry(
     entry: Result<DirEntry, ignore::Error>,
-    root: &Path,
+    base: &Path,
     filters: &PathFilters,
     matcher: &RegexMatcher,
     cell_context: usize,
@@ -223,7 +209,7 @@ fn nb_entry(
     let path = dent.path();
     let Some(ft) = dent.file_type() else { return Ok(Vec::new()); };
     if !ft.is_file() { return Ok(Vec::new()); }
-    let rel = rel_path(root, path);
+    let rel = rel_path(base, path);
     if !filters.path_allowed(Path::new(&rel)) { return Ok(Vec::new()); }
     let bytes = match std::fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
     process_file(rel, &bytes, matcher, cell_context, multiline)
@@ -232,32 +218,17 @@ fn nb_entry(
 pub type NbIter = StreamIter<NbCell>;
 
 pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
-    let (ignore, hidden) = file_root_flags(&opts.root, opts.ignore, opts.hidden);
-    let root = normalize_root(&opts.root)?;
-    let filters = Arc::new(PathFilters::new(
-        &opts.includes,
-        &opts.excludes,
-        &opts.exts,
-        opts.path_re.as_deref(),
-        opts.skip_path_re.as_deref(),
-        &opts.skip_dirs,
-        opts.skip_dir_re.as_deref(),
-    )?);
+    let (roots, base) = resolve_roots(&opts.walk, true, false)?;
+    let filters = Arc::new(PathFilters::new(&opts.walk)?);
     let matcher = compile_nb_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, opts.multiline)?;
-    let cell_context = opts.cell_context;
-    let multiline = opts.multiline;
-    let max_depth = opts.max_depth;
+    let (cell_context, multiline, max_depth) = (opts.cell_context, opts.multiline, opts.walk.max_depth);
     Ok(spawn_walk(
-        root,
-        ignore,
-        hidden,
-        opts.max_depth,
-        opts.min_depth,
-        opts.max_filesize,
-        opts.follow_links,
-        opts.same_file_system,
+        roots,
+        base,
+        &opts.walk,
         filters,
-        move |dent, root, filters, tx, cancel| match nb_entry(dent, root, filters, &matcher, cell_context, multiline, max_depth) {
+        Vec::new(),
+        move |dent, base, filters, tx, cancel| match nb_entry(dent, base, filters, &matcher, cell_context, multiline, max_depth) {
             Ok(cells) => {
                 for cell in cells { if cancel.load(Ordering::Relaxed) || tx.send(Ok(cell)).is_err() { return WalkState::Quit; } }
                 WalkState::Continue

@@ -10,9 +10,10 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 
 use crate::search::spans_for;
+use crate::walk::{find_iter_with, resolve_roots};
 use crate::{
-    FindIter, FindOptions, NbCell, NbIter, NbOptions, RgIter, RgOptions, SearchBlock, SearchLine, StreamIter, block_iter as block_iter_core, compile_regex,
-    find, find_iter as find_iter_core, nb_iter as nb_iter_core, nb_search_file, rg_iter as rg_iter_core, search_path as search_path_core,
+    FindIter, FindOptions, NbCell, NbIter, NbOptions, RgIter, RgOptions, SearchBlock, SearchLine, StreamIter, WalkOptions, block_iter as block_iter_core,
+    compile_regex, find, find_iter as find_iter_core, nb_iter as nb_iter_core, nb_search_file, rg_iter as rg_iter_core, search_path as search_path_core,
     search_text as search_text_core,
 };
 use std::path::Path;
@@ -190,137 +191,15 @@ fn compile_regex_py(pattern: String, case_sensitive: Option<bool>, smart_case: b
 }
 #[pyfunction(name = "compile")]
 fn compile_py(pattern: String, case_sensitive: Option<bool>, smart_case: bool) -> PyResult<RegexPy> { compile_regex_py(pattern, case_sensitive, smart_case) }
-fn find_opts(
-    root: PathBuf,
-    pattern: Option<String>,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
-) -> FindOptions {
-    FindOptions {
-        root,
-        pattern,
-        includes: include.unwrap_or_default(),
-        excludes: exclude.unwrap_or_default(),
-        exts: exts.unwrap_or_default(),
-        path_re,
-        skip_path_re,
-        skip_dirs: skip_dir.unwrap_or_default(),
-        skip_dir_re,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        files,
-        dirs,
-        special_files: false,
-        panic_probe: false,
-    }
-}
-
-#[pyfunction(name = "walk")]
-fn walk_py(
-    py: Python<'_>,
-    root: PathBuf,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
-    timeout_ms: Option<u64>,
-) -> PyResult<(Vec<PathBuf>, bool)> {
-    let opts = find_opts(
-        root,
-        None,
-        None,
-        None,
-        None,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        files,
-        dirs,
-    );
-    let iter = find_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
-    collect_stream_py(py, iter, |p| p, timeout_ms)
+#[pyfunction(name = "walk_base")]
+fn walk_base_py(walk: WalkOptions, canonical: bool, walk_root_links: bool) -> PyResult<PathBuf> {
+    resolve_roots(&walk, canonical, walk_root_links).map(|(_, base)| base).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 #[pyfunction(name = "find")]
-fn find_py(
-    py: Python<'_>,
-    root: PathBuf,
-    pattern: Option<String>,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
-    timeout_ms: Option<u64>,
-) -> PyResult<(Vec<PathBuf>, bool)> {
-    let opts = find_opts(
-        root,
-        pattern,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        files,
-        dirs,
-    );
-    let iter = find_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
+fn find_py(py: Python<'_>, walk: WalkOptions, pattern: Option<String>, files: bool, dirs: bool, timeout_ms: Option<u64>, walk_root_links: bool) -> PyResult<(Vec<PathBuf>, bool)> {
+    let opts = FindOptions { walk, pattern, files, dirs, ..FindOptions::default() };
+    let iter = find_iter_with(&opts, walk_root_links).map_err(|e| PyValueError::new_err(e.to_string()))?;
     collect_stream_py(py, iter, |p| p, timeout_ms)
 }
 #[pyfunction(name = "search_text")]
@@ -344,72 +223,11 @@ fn search_path_py(
         .map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
-fn rg_opts(
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
-) -> RgOptions {
-    RgOptions {
-        root: PathBuf::from(root),
-        pattern,
-        includes: include.unwrap_or_default(),
-        excludes: exclude.unwrap_or_default(),
-        exts: exts.unwrap_or_default(),
-        path_re,
-        skip_path_re,
-        skip_dirs: skip_dir.unwrap_or_default(),
-        skip_dir_re,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        case_sensitive,
-        smart_case,
-        before_context,
-        after_context,
-        panic_probe: false,
-    }
-}
-
 #[pyfunction(name = "rg")]
 fn rg_py(
     py: Python<'_>,
+    walk: WalkOptions,
     pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
     case_sensitive: Option<bool>,
     smart_case: bool,
     before_context: usize,
@@ -417,129 +235,37 @@ fn rg_py(
     lnhash: bool,
     timeout_ms: Option<u64>,
 ) -> PyResult<(Vec<SearchLinePy>, bool)> {
-    let opts = rg_opts(
-        pattern,
-        root,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        case_sensitive,
-        smart_case,
-        before_context,
-        after_context,
-    );
+    let opts = RgOptions { walk, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     collect_stream_py(py, iter, move |l| search_line_py(l, lnhash), timeout_ms)
 }
 
 #[pyfunction(name = "block_search")]
-#[allow(clippy::too_many_arguments)]
 fn block_search_py(
     py: Python<'_>,
+    walk: WalkOptions,
     pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
     case_sensitive: Option<bool>,
     smart_case: bool,
     before_context: usize,
     after_context: usize,
     timeout_ms: Option<u64>,
 ) -> PyResult<(Vec<BlockRow>, bool)> {
-    let opts = rg_opts(
-        pattern,
-        root,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        case_sensitive,
-        smart_case,
-        before_context,
-        after_context,
-    );
+    let opts = RgOptions { walk, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     let iter = block_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     collect_stream_py(py, iter, block_row, timeout_ms)
 }
 #[pyfunction(name = "rg_iter")]
 fn rg_iter_py(
+    walk: WalkOptions,
     pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
     case_sensitive: Option<bool>,
     smart_case: bool,
     before_context: usize,
     after_context: usize,
     lnhash: bool,
 ) -> PyResult<RgIterPy> {
-    let opts = rg_opts(
-        pattern,
-        root,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        case_sensitive,
-        smart_case,
-        before_context,
-        after_context,
-    );
+    let opts = RgOptions { walk, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     rg_iter_core(&opts).map(|inner| RgIterPy { inner, display_lnhash: lnhash }).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
@@ -554,46 +280,8 @@ impl FindIterPy {
 }
 
 #[pyfunction(name = "find_iter")]
-fn find_iter_py(
-    root: PathBuf,
-    pattern: Option<String>,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
-) -> PyResult<FindIterPy> {
-    let opts = find_opts(
-        root,
-        pattern,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        files,
-        dirs,
-    );
+fn find_iter_py(walk: WalkOptions, pattern: Option<String>, files: bool, dirs: bool) -> PyResult<FindIterPy> {
+    let opts = FindOptions { walk, pattern, files, dirs, ..FindOptions::default() };
     find_iter_core(&opts).map(|inner| FindIterPy { inner }).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
@@ -604,97 +292,16 @@ struct AsyncHandlePy { cancel: Arc<AtomicBool> }
 impl AsyncHandlePy { fn cancel(&self) { self.cancel.store(true, Ordering::Relaxed); } }
 
 #[pyfunction(name = "find_async")]
-fn find_async_py(
-    cb: Py<PyAny>,
-    root: PathBuf,
-    pattern: Option<String>,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
-    timeout_ms: Option<u64>,
-) -> PyResult<AsyncHandlePy> {
-    let opts = find_opts(
-        root,
-        pattern,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        files,
-        dirs,
-    );
+fn find_async_py(cb: Py<PyAny>, walk: WalkOptions, pattern: Option<String>, files: bool, dirs: bool, timeout_ms: Option<u64>) -> PyResult<AsyncHandlePy> {
+    let opts = FindOptions { walk, pattern, files, dirs, ..FindOptions::default() };
     let iter = find_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     Ok(stream_async(cb, iter, deadline, |py, paths, timed_out| Ok((paths, timed_out).into_pyobject(py)?.into_any().unbind())))
 }
 
 #[pyfunction(name = "find_iter_async")]
-#[allow(clippy::too_many_arguments)]
-fn find_iter_async_py(
-    cb: Py<PyAny>,
-    batch_max: usize,
-    root: PathBuf,
-    pattern: Option<String>,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    files: bool,
-    dirs: bool,
-) -> PyResult<AsyncHandlePy> {
-    let opts = find_opts(
-        root,
-        pattern,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        files,
-        dirs,
-    );
+fn find_iter_async_py(cb: Py<PyAny>, batch_max: usize, walk: WalkOptions, pattern: Option<String>, files: bool, dirs: bool) -> PyResult<AsyncHandlePy> {
+    let opts = FindOptions { walk, pattern, files, dirs, ..FindOptions::default() };
     let iter = find_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(stream_iter_async(cb, iter, batch_max, |py, paths| Ok(paths.into_pyobject(py)?.into_any().unbind())))
 }
@@ -793,25 +400,10 @@ where
 }
 
 #[pyfunction(name = "rg_async")]
-#[allow(clippy::too_many_arguments)]
 fn rg_async_py(
     cb: Py<PyAny>,
+    walk: WalkOptions,
     pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
     case_sensitive: Option<bool>,
     smart_case: bool,
     before_context: usize,
@@ -819,28 +411,7 @@ fn rg_async_py(
     lnhash: bool,
     timeout_ms: Option<u64>,
 ) -> PyResult<AsyncHandlePy> {
-    let opts = rg_opts(
-        pattern,
-        root,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        case_sensitive,
-        smart_case,
-        before_context,
-        after_context,
-    );
+    let opts = RgOptions { walk, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     Ok(stream_async(cb, iter, deadline, move |py, rows, timed_out| {
@@ -850,53 +421,17 @@ fn rg_async_py(
 }
 
 #[pyfunction(name = "block_search_async")]
-#[allow(clippy::too_many_arguments)]
 fn block_search_async_py(
     cb: Py<PyAny>,
+    walk: WalkOptions,
     pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
     case_sensitive: Option<bool>,
     smart_case: bool,
     before_context: usize,
     after_context: usize,
     timeout_ms: Option<u64>,
 ) -> PyResult<AsyncHandlePy> {
-    let opts = rg_opts(
-        pattern,
-        root,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        case_sensitive,
-        smart_case,
-        before_context,
-        after_context,
-    );
+    let opts = RgOptions { walk, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     let iter = block_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     Ok(stream_async(cb, iter, deadline, |py, rows, timed_out| {
@@ -906,54 +441,18 @@ fn block_search_async_py(
 }
 
 #[pyfunction(name = "rg_iter_async")]
-#[allow(clippy::too_many_arguments)]
 fn rg_iter_async_py(
     cb: Py<PyAny>,
     batch_max: usize,
+    walk: WalkOptions,
     pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
     case_sensitive: Option<bool>,
     smart_case: bool,
     before_context: usize,
     after_context: usize,
     lnhash: bool,
 ) -> PyResult<AsyncHandlePy> {
-    let opts = rg_opts(
-        pattern,
-        root,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        case_sensitive,
-        smart_case,
-        before_context,
-        after_context,
-    );
+    let opts = RgOptions { walk, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(stream_iter_async(cb, iter, batch_max, move |py, rows| {
         let rows: Vec<SearchLinePy> = rows.into_iter().map(|l| search_line_py(l, lnhash)).collect();
@@ -962,14 +461,14 @@ fn rg_iter_async_py(
 }
 
 #[pyfunction(name = "panic_probe")]
-fn panic_probe_py(py: Python<'_>, root: &str, walk: bool) -> PyResult<()> {
-    let root = PathBuf::from(root);
+fn panic_probe_py(py: Python<'_>, root: PathBuf, walk: bool) -> PyResult<()> {
+    let walk_opts = WalkOptions { roots: vec![root], ..WalkOptions::default() };
     if walk {
-        let opts = FindOptions { root, panic_probe: true, ..FindOptions::default() };
+        let opts = FindOptions { walk: walk_opts, panic_probe: true, ..FindOptions::default() };
         find(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     }
     else {
-        let opts = RgOptions { root, pattern: "panic_probe".to_string(), panic_probe: true, ..RgOptions::default() };
+        let opts = RgOptions { walk: walk_opts, pattern: "panic_probe".to_string(), panic_probe: true, ..RgOptions::default() };
         let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
         collect_stream_py(py, iter, |l| search_line_py(l, false), None)?;
     }
@@ -998,53 +497,6 @@ fn nb_row(cell: NbCell) -> NbRow {
     (cell.path, cell.cell_index, cell.cell_id, cell.cell_type, cell.kind.to_string(), cell.source, cell.matches.into_iter().map(SearchLinePy::from).collect())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn nb_opts(
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
-) -> NbOptions {
-    NbOptions {
-        root: PathBuf::from(root),
-        pattern,
-        includes: include.unwrap_or_default(),
-        excludes: exclude.unwrap_or_default(),
-        exts: exts.unwrap_or_default(),
-        path_re,
-        skip_path_re,
-        skip_dirs: skip_dir.unwrap_or_default(),
-        skip_dir_re,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        case_sensitive,
-        smart_case,
-        cell_context,
-        multiline,
-    }
-}
-
 #[pyclass(name = "NbIter", unsendable)]
 struct NbIterPy { inner: NbIter }
 #[pymethods]
@@ -1056,154 +508,39 @@ impl NbIterPy {
 }
 
 #[pyfunction(name = "nb_search")]
-#[allow(clippy::too_many_arguments)]
 fn nb_search_py(
     py: Python<'_>,
+    walk: WalkOptions,
     pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
     case_sensitive: Option<bool>,
     smart_case: bool,
     cell_context: usize,
     multiline: bool,
     timeout_ms: Option<u64>,
 ) -> PyResult<(Vec<NbRow>, bool)> {
-    let opts = nb_opts(
-        pattern,
-        root,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        case_sensitive,
-        smart_case,
-        cell_context,
-        multiline,
-    );
+    let opts = NbOptions { walk, pattern, case_sensitive, smart_case, cell_context, multiline };
     let iter = nb_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     collect_stream_py(py, iter, nb_row, timeout_ms)
 }
 
 #[pyfunction(name = "nb_iter")]
-#[allow(clippy::too_many_arguments)]
-fn nb_iter_py(
-    pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
-) -> PyResult<NbIterPy> {
-    let opts = nb_opts(
-        pattern,
-        root,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        case_sensitive,
-        smart_case,
-        cell_context,
-        multiline,
-    );
+fn nb_iter_py(walk: WalkOptions, pattern: String, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool) -> PyResult<NbIterPy> {
+    let opts = NbOptions { walk, pattern, case_sensitive, smart_case, cell_context, multiline };
     nb_iter_core(&opts).map(|inner| NbIterPy { inner }).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 #[pyfunction(name = "nb_search_async")]
-#[allow(clippy::too_many_arguments)]
 fn nb_search_async_py(
     cb: Py<PyAny>,
+    walk: WalkOptions,
     pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
     case_sensitive: Option<bool>,
     smart_case: bool,
     cell_context: usize,
     multiline: bool,
     timeout_ms: Option<u64>,
 ) -> PyResult<AsyncHandlePy> {
-    let opts = nb_opts(
-        pattern,
-        root,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        case_sensitive,
-        smart_case,
-        cell_context,
-        multiline,
-    );
+    let opts = NbOptions { walk, pattern, case_sensitive, smart_case, cell_context, multiline };
     let iter = nb_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     Ok(stream_async(cb, iter, deadline, |py, rows, timed_out| {
@@ -1213,53 +550,17 @@ fn nb_search_async_py(
 }
 
 #[pyfunction(name = "nb_iter_async")]
-#[allow(clippy::too_many_arguments)]
 fn nb_iter_async_py(
     cb: Py<PyAny>,
     batch_max: usize,
+    walk: WalkOptions,
     pattern: String,
-    root: &str,
-    include: Option<Vec<String>>,
-    exclude: Option<Vec<String>>,
-    exts: Option<Vec<String>>,
-    hidden: bool,
-    ignore: bool,
-    max_depth: Option<usize>,
-    min_depth: Option<usize>,
-    max_filesize: Option<u64>,
-    follow_links: bool,
-    same_file_system: bool,
-    path_re: Option<String>,
-    skip_path_re: Option<String>,
-    skip_dir: Option<Vec<String>>,
-    skip_dir_re: Option<String>,
     case_sensitive: Option<bool>,
     smart_case: bool,
     cell_context: usize,
     multiline: bool,
 ) -> PyResult<AsyncHandlePy> {
-    let opts = nb_opts(
-        pattern,
-        root,
-        include,
-        exclude,
-        exts,
-        hidden,
-        ignore,
-        max_depth,
-        min_depth,
-        max_filesize,
-        follow_links,
-        same_file_system,
-        path_re,
-        skip_path_re,
-        skip_dir,
-        skip_dir_re,
-        case_sensitive,
-        smart_case,
-        cell_context,
-        multiline,
-    );
+    let opts = NbOptions { walk, pattern, case_sensitive, smart_case, cell_context, multiline };
     let iter = nb_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(stream_iter_async(cb, iter, batch_max, |py, rows| {
         let rows: Vec<NbRow> = rows.into_iter().map(nb_row).collect();
@@ -1305,7 +606,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<RgIterPy>()?;
     m.add_class::<RegexPy>()?;
     m.add_function(wrap_pyfunction!(compile_py, m)?)?;
-    m.add_function(wrap_pyfunction!(walk_py, m)?)?;
+    m.add_function(wrap_pyfunction!(walk_base_py, m)?)?;
     m.add_function(wrap_pyfunction!(find_py, m)?)?;
     m.add_class::<FindIterPy>()?;
     m.add_function(wrap_pyfunction!(find_iter_py, m)?)?;

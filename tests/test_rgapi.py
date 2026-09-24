@@ -39,6 +39,8 @@ def test_fd_paths_preserve_names_and_root_links(tmp_path):
     assert fd(file_link) == [file_link]
     assert fd(link, follow_links=True) == [link / "app.py"]
     assert fd(file_link, follow_links=True) == [file_link]
+    assert fd(broken, follow_links=True) == [broken]
+    assert broken in fd(tmp_path, follow_links=True)
     assert fd(link, min_depth=1) == []
     assert "alias" in str(fd(link))
     if os.name != "posix": return
@@ -611,6 +613,29 @@ def test_paths_and_ls(tmp_path):
     assert tmp_path/"src" in res and tmp_path/"ignored.txt" in res
     assert tmp_path/"src/app.py" not in res and tmp_path/".hidden" not in res
     assert tmp_path/".hidden" in ls(tmp_path, hidden=True)
+    (tmp_path/"srclink").symlink_to(tmp_path/"src", target_is_directory=True)
+    assert tmp_path/"srclink/app.py" in ls(tmp_path/"srclink")
+
+
+def test_list_roots(tmp_path):
+    from rgapi import ls, nbrg
+    src, tests = tmp_path/"src", tmp_path/"tests"
+    (src/"deep").mkdir(parents=True)
+    tests.mkdir()
+    for p in (src/"app.py", src/"deep/x.py", tests/"t.py"): p.write_text("TODO\n")
+    (tests/"n.ipynb").write_text(json.dumps({"cells": [dict(cell_type="code", id="c1", source="TODO")]}))
+    labels = lambda res: sorted(r.path for r in res)
+    assert labels(rg("TODO", [src, tests])) == ["src/app.py", "src/deep/x.py", "tests/n.ipynb", "tests/t.py"]
+    assert labels(rg("TODO", [src])) == labels(rg("TODO", src)) == ["app.py", "deep/x.py"]
+    assert labels(rg("TODO", [src/"app.py", tests], ext="py")) == ["src/app.py", "tests/t.py"]
+    assert labels(rg("TODO", [src, tests], path_re="^src/", skip_dir="deep")) == ["src/app.py"]
+    assert rg("TODO", [tmp_path, src, src], count=True) == rg("TODO", tmp_path, count=True)
+    found = fd([src, tests])
+    assert set(found) == set(rg("TODO", [src, tests], paths=True)) == {src/"app.py", src/"deep/x.py", tests/"n.ipynb", tests/"t.py"}
+    assert "tests/t.py" in str(found)
+    assert [c.path for c in nbrg("TODO", [src, tests])] == ["tests/n.ipynb"]
+    (tmp_path/"srclink").symlink_to(src, target_is_directory=True)
+    assert {tmp_path/"srclink/app.py", tests/"t.py"} <= set(ls([tmp_path/"srclink", tests]))
 
 
 def test_file_root_ignores_siblings_and_depth_cap_permissions(tmp_path):

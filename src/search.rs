@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -11,7 +11,7 @@ use grep_searcher::{BinaryDetection, SearcherBuilder, Sink, SinkContext, SinkCon
 use ignore::{DirEntry, WalkState};
 
 use crate::RgApiError;
-use crate::walk::{PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk};
+use crate::walk::{PathFilters, StreamIter, WalkOptions, entry_err, rel_path, resolve_roots, spawn_walk};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchSpan { pub start: usize, pub end: usize }
@@ -36,24 +36,10 @@ pub struct SearchLine {
     pub matches: Vec<MatchSpan>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RgOptions {
-    pub root: PathBuf,
+    pub walk: WalkOptions,
     pub pattern: String,
-    pub includes: Vec<String>,
-    pub excludes: Vec<String>,
-    pub exts: Vec<String>,
-    pub path_re: Option<String>,
-    pub skip_path_re: Option<String>,
-    pub skip_dirs: Vec<String>,
-    pub skip_dir_re: Option<String>,
-    pub hidden: bool,
-    pub ignore: bool,
-    pub max_depth: Option<usize>,
-    pub min_depth: Option<usize>,
-    pub max_filesize: Option<u64>,
-    pub follow_links: bool,
-    pub same_file_system: bool,
     pub case_sensitive: Option<bool>,
     pub smart_case: bool,
     pub before_context: usize,
@@ -61,72 +47,24 @@ pub struct RgOptions {
     pub panic_probe: bool,
 }
 
-impl Default for RgOptions {
-    fn default() -> Self {
-        Self {
-            root: PathBuf::from("."),
-            pattern: String::new(),
-            includes: Vec::new(),
-            excludes: Vec::new(),
-            exts: Vec::new(),
-            path_re: None,
-            skip_path_re: None,
-            skip_dirs: Vec::new(),
-            skip_dir_re: None,
-            hidden: false,
-            ignore: true,
-            max_depth: None,
-            min_depth: None,
-            max_filesize: None,
-            follow_links: false,
-            same_file_system: false,
-            case_sensitive: None,
-            smart_case: false,
-            before_context: 0,
-            after_context: 0,
-            panic_probe: false,
-        }
-    }
-}
-
 pub fn rg(opts: &RgOptions) -> Result<Vec<SearchLine>, RgApiError> { rg_iter(opts)?.collect() }
 
 pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
-    let (ignore, hidden) = file_root_flags(&opts.root, opts.ignore, opts.hidden);
-    let root = normalize_root(&opts.root)?;
-    let filters = Arc::new(PathFilters::new(
-        &opts.includes,
-        &opts.excludes,
-        &opts.exts,
-        opts.path_re.as_deref(),
-        opts.skip_path_re.as_deref(),
-        &opts.skip_dirs,
-        opts.skip_dir_re.as_deref(),
-    )?);
+    let (roots, base) = resolve_roots(&opts.walk, true, false)?;
+    let filters = Arc::new(PathFilters::new(&opts.walk)?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, false)?;
-    let (before_context, after_context, panic_probe, max_depth) = (opts.before_context, opts.after_context, opts.panic_probe, opts.max_depth);
-    Ok(spawn_walk(
-        root,
-        ignore,
-        hidden,
-        opts.max_depth,
-        opts.min_depth,
-        opts.max_filesize,
-        opts.follow_links,
-        opts.same_file_system,
-        filters,
-        move |dent, root, filters, tx, cancel| {
-            if panic_probe { panic!("rgapi: deliberate panic for tests (panic_probe)"); }
-            search_entry(dent, root, filters, &matcher, before_context, after_context, max_depth, tx, cancel)
-        },
-    ))
+    let (before_context, after_context, panic_probe, max_depth) = (opts.before_context, opts.after_context, opts.panic_probe, opts.walk.max_depth);
+    Ok(spawn_walk(roots, base, &opts.walk, filters, Vec::new(), move |dent, base, filters, tx, cancel| {
+        if panic_probe { panic!("rgapi: deliberate panic for tests (panic_probe)"); }
+        search_entry(dent, base, filters, &matcher, before_context, after_context, max_depth, tx, cancel)
+    }))
 }
 
 pub type RgIter = StreamIter<SearchLine>;
 
 fn search_entry(
     entry: Result<DirEntry, ignore::Error>,
-    root: &Path,
+    base: &Path,
     filters: &PathFilters,
     matcher: &RegexMatcher,
     before_context: usize,
@@ -145,7 +83,7 @@ fn search_entry(
     let path = dent.path();
     let Some(ft) = dent.file_type() else { return WalkState::Continue; };
     if !ft.is_file() { return WalkState::Continue; }
-    let rel = rel_path(root, path);
+    let rel = rel_path(base, path);
     if !filters.path_allowed(Path::new(&rel)) { return WalkState::Continue; }
     match search_path_cancelable(path, rel, matcher.clone(), before_context, after_context, Some(cancel.clone())) {
         Ok(lines) => {

@@ -5,12 +5,16 @@ from fastcore.meta import delegates
 
 from contextlib import aclosing
 
-from . import MAXLEN, _core, _walk_args, _fs_path, _display_path, _acall, _abatches, _mk_results, _paths_reduce, _preview, _Results
+from . import MAXLEN, _core, _walk, _walk_args, _fs_path, _display_path, _acall, _abatches, _mk_results, _paths_reduce, _preview, _Results
 
 
 
 class NbCell:
-    "A notebook cell that matched (or provides context for) a search."
+    """A notebook cell that matched (or provides context for) a search.
+
+    Fields: `path`, `cell_index`, `cell_id`, `cell_type` (code, markdown, or raw), `kind` (match or context), the full `source`, and
+    `matches` as matching `SearchLine`s. The display is `path:cell_id:source`, with `-` in place of the last colon on context rows.
+    Newline runs display as ¶, keeping indentation. `maxlen` limits the displayed source, not the stored `source`."""
     def __init__(self, path, cell_index, cell_id, cell_type, kind, source, matches, maxlen=MAXLEN):
         self.path,self.cell_index,self.cell_id = path,cell_index,cell_id
         self.cell_type,self.kind,self.source,self.matches,self.maxlen = cell_type,kind,source,matches,maxlen
@@ -69,12 +73,12 @@ def search_nb(
     return res
 
 
-def _nb_post(rows, paths, count, max_results, timed_out, maxlen, root):
+def _nb_post(rows, paths, count, max_results, timed_out, maxlen, w):
     "Reduce collected notebook rows to the requested `nbrg`/`nbrga` result form"
     res = _rows_to_cells(rows, maxlen)
     res.sort(key=lambda c: (c.path, c.cell_index))
     if count: return len(res)
-    if paths: return _paths_reduce(res, root, max_results, timed_out)
+    if paths: return _paths_reduce(res, w, max_results, timed_out)
     capped = max_results is not None and len(res) > max_results
     return _mk_results(NbResults, res[:max_results] if capped else res, capped, timed_out)
 
@@ -82,7 +86,7 @@ def _nb_post(rows, paths, count, max_results, timed_out, maxlen, root):
 @delegates(_walk_args, but=["ext"])
 def nbrg(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory or file to search (expands `~`)
+    root:str|Path|list=".", # Directory or file to search, or a list of them (expands `~`)
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
@@ -94,20 +98,23 @@ def nbrg(
     maxlen:int=MAXLEN, # Maximum source characters per displayed cell
     **kwargs
 ):
-    "Search `.ipynb` cell sources under `root` in parallel, returning matched cells, paths, or a count."
+    """Search `.ipynb` cell sources under `root` in parallel, returning matched cells, paths, or a count.
+
+    Only cell sources are searched, never metadata or outputs. With `multiline=True`, `^` and `$` still anchor lines within a cell.
+    A match preview starts at the first matched line and marks omitted earlier lines as `…[Ln]` (1-based), but keeps a leading
+    directive, as in `#| export…[L4]needle here`."""
     assert not (count and max_results), "count and max_results are mutually exclusive"
     assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
     assert not (paths and count), "paths and count are mutually exclusive"
-    rt = _fs_path(root)
-    rows, timed_out = _core.nb_search(pattern, rt, *_walk_args(ext="ipynb", **kwargs),
-        case_sensitive, smart_case, cell_context, multiline, timeout_ms)
-    return _nb_post(rows, paths, count, max_results, timed_out, maxlen, rt)
+    w = _walk(root, ext="ipynb", **kwargs)
+    rows, timed_out = _core.nb_search(w, pattern, case_sensitive, smart_case, cell_context, multiline, timeout_ms)
+    return _nb_post(rows, paths, count, max_results, timed_out, maxlen, w)
 
 
 @delegates(_walk_args, but=["ext"])
 def nbrg_iter(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory or file to search (expands `~`)
+    root:str|Path|list=".", # Directory or file to search, or a list of them (expands `~`)
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
@@ -116,14 +123,14 @@ def nbrg_iter(
     **kwargs
 ):
     "Search `.ipynb` cell sources lazily, yielding `NbCell` rows as they are found."
-    it = _core.nb_iter(pattern, _fs_path(root), *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context, multiline)
+    it = _core.nb_iter(_walk(root, ext="ipynb", **kwargs), pattern, case_sensitive, smart_case, cell_context, multiline)
     return (_row_to_cell(row, maxlen) for row in it)
 
 
 @delegates(_walk_args, but=["ext"])
 async def nbrga(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory or file to search (expands `~`)
+    root:str|Path|list=".", # Directory or file to search, or a list of them (expands `~`)
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
@@ -139,16 +146,15 @@ async def nbrga(
     assert not (count and max_results), "count and max_results are mutually exclusive"
     assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
     assert not (paths and count), "paths and count are mutually exclusive"
-    rt = _fs_path(root)
-    rows, timed_out = await _acall(_core.nb_search_async, pattern, rt,
-        *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context, multiline, timeout_ms)
-    return _nb_post(rows, paths, count, max_results, timed_out, maxlen, rt)
+    w = _walk(root, ext="ipynb", **kwargs)
+    rows, timed_out = await _acall(_core.nb_search_async, w, pattern, case_sensitive, smart_case, cell_context, multiline, timeout_ms)
+    return _nb_post(rows, paths, count, max_results, timed_out, maxlen, w)
 
 
 @delegates(_walk_args, but=["ext"])
 async def nbrga_iter(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory or file to search (expands `~`)
+    root:str|Path|list=".", # Directory or file to search, or a list of them (expands `~`)
     cell_context:int=0, # Cells of context to include before/after each matching cell
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
@@ -158,7 +164,7 @@ async def nbrga_iter(
     **kwargs
 ):
     "Async `nbrg_iter`: yield `NbCell` rows as they are found; early exit cancels the search."
-    async with aclosing(_abatches(_core.nb_iter_async, batch_max, pattern, _fs_path(root),
-        *_walk_args(ext="ipynb", **kwargs), case_sensitive, smart_case, cell_context, multiline)) as batches:
+    async with aclosing(_abatches(_core.nb_iter_async, batch_max, _walk(root, ext="ipynb", **kwargs), pattern,
+        case_sensitive, smart_case, cell_context, multiline)) as batches:
         async for rows in batches:
             for row in rows: yield _row_to_cell(row, maxlen)

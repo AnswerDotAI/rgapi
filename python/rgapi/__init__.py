@@ -3,7 +3,7 @@ from contextlib import aclosing
 from datetime import datetime
 from stat import S_ISLNK, filemode
 
-from os import fspath
+from os import PathLike, fspath
 from pathlib import Path
 from fastcore.meta import delegates
 
@@ -41,12 +41,11 @@ def _hsize(n):
         n /= 1024
     return f"{n:.0f}" if u == "B" else f"{n:.1f}{u}"
 
-def _path_base(root, follow_links=True):
-    root = Path(root).absolute()
-    return root if (follow_links or not root.is_symlink()) and root.is_dir() else root.parent
-
 class PathResults(_Results):
-    "Absolute `Path` objects with root-relative plain and `ls -l`-style displays"
+    """Absolute `Path` objects with root-relative plain and `ls -l`-style displays.
+
+    The display is an ls-style table capped at `MAX_REPR` names. `str(res)` gives one root-relative name per line, and `list(res)`
+    the absolute Paths. Slices keep the display root and completion status."""
     def __init__(self, paths=(), root=".", show_target=False):
         self.root,self.show_target = Path(root).absolute(),show_target
         super().__init__(self.root/p for p in paths)
@@ -94,7 +93,7 @@ def _context(context, before_context, after_context):
 
 
 def walk(
-    root:str|Path=".", # Directory or file to walk (expands `~`)
+    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     hidden:bool=False, # Include hidden files and directories
     ignore:bool=True, # Respect `.gitignore` and other ignore files
     max_depth:int|None=None, # Maximum directory depth to descend
@@ -111,10 +110,9 @@ def walk(
     timeout_ms:int|None=None, # Cancel the walk after this long and return partial results
 ) -> PathResults:
     "Walk a directory and return absolute file and/or directory Paths."
-    rt = Path(root).expanduser().absolute()
-    paths, timed_out = _core.walk(rt, hidden, ignore, max_depth, min_depth, max_filesize, follow_links,
-        same_file_system, path_re, skip_path_re, _listify(skip_dir), skip_dir_re, files, dirs, timeout_ms)
-    return _mk_results(PathResults, paths, False, timed_out, root=_path_base(rt, follow_links))
+    return _find(root, None, files, dirs, timeout_ms, hidden=hidden, ignore=ignore, max_depth=max_depth, min_depth=min_depth,
+        max_filesize=max_filesize, follow_links=follow_links, same_file_system=same_file_system, path_re=path_re, skip_path_re=skip_path_re,
+        skip_dir=skip_dir, skip_dir_re=skip_dir_re)
 
 
 def _walk_args(
@@ -134,14 +132,26 @@ def _walk_args(
     skip_dir:str|list|None=None, # Directory glob or globs to prune
     skip_dir_re:str|None=None, # Directory regex used to prune traversal
 ):
-    "Walk/filter positional tail for `_core` calls; delegators pass their `**kwargs` here whole"
+    "`_core` walk options from the shared walk parameters. Delegators pass their `**kwargs` here whole."
     include, exclude, exts = _filters(glob, include, exclude, ext)
-    return (include, exclude, exts, hidden, ignore, max_depth, min_depth, max_filesize,
-        follow_links, same_file_system, path_re, skip_path_re, _listify(skip_dir), skip_dir_re)
+    return dict(includes=include, excludes=exclude, exts=exts, hidden=hidden, ignore=ignore, max_depth=max_depth, min_depth=min_depth,
+        max_filesize=max_filesize, follow_links=follow_links, same_file_system=same_file_system, path_re=path_re, skip_path_re=skip_path_re,
+        skip_dirs=_listify(skip_dir), skip_dir_re=skip_dir_re)
+
+def _walk(root, **kwargs):
+    "`_core` walk options for `root`, which is one path or an iterable of paths, and the shared walk parameters"
+    roots = [root] if isinstance(root, (str, PathLike)) else root
+    return dict(roots=[Path(r).expanduser() for r in roots], **_walk_args(**kwargs))
+
+def _find(root, pattern=None, files=True, dirs=False, timeout_ms=None, show_target=False, root_links=False, **kwargs):
+    "Collected `_core.find` results as `PathResults`. `root_links` walks a root link to a directory, as `ls` does."
+    w = _walk(root, **kwargs)
+    paths, timed_out = _core.find(w, pattern, files, dirs, timeout_ms, root_links)
+    return _mk_results(PathResults, paths, False, timed_out, root=_core.walk_base(w, False, root_links), show_target=show_target)
 
 @delegates(_walk_args)
 def fd(
-    root:str|Path=".", # Directory or file to walk (expands `~`)
+    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
@@ -150,28 +160,26 @@ def fd(
     **kwargs
 ) -> PathResults:
     "Find absolute Paths with fd-style filters and gitignore support."
-    rt = Path(root).expanduser().absolute()
-    paths, timed_out = _core.find(rt, pattern, *_walk_args(**kwargs), files, dirs, timeout_ms)
-    return _mk_results(PathResults, paths, False, timed_out, root=_path_base(rt, kwargs.get('follow_links', False)), show_target=show_target)
+    return _find(root, pattern, files, dirs, timeout_ms, show_target, **kwargs)
 
 
 @delegates(_walk_args)
 def fd_iter(
-    root:str|Path=".", # Directory or file to walk (expands `~`)
+    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
     **kwargs
 ):
     "Walk lazily, yielding absolute Paths; early exit stops the walk."
-    rt = Path(root).expanduser().absolute()
-    base = _path_base(rt, kwargs.get('follow_links', False))
-    return (base/p for p in _core.find_iter(rt, pattern, *_walk_args(**kwargs), files, dirs))
+    w = _walk(root, **kwargs)
+    base = _core.walk_base(w, False, False)
+    return (base/p for p in _core.find_iter(w, pattern, files, dirs))
 
 
 @delegates(fd)
 def ls(
-    root:str|Path=".", # Directory or file to list (expands `~`)
+    root:str|Path|list=".", # Directory or file to list, or a list of them (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
     hidden:bool=False, # Include hidden files and directories, like `ls -a`
     dirs:bool=True, # Include directories in results
@@ -179,8 +187,8 @@ def ls(
     ignore:bool=False, # Respect `.gitignore` and other ignore files
     **kwargs
 ) -> PathResults:
-    "List a directory like `ls`: one level, directories included, ignore rules off, sorted by name."
-    res = fd(root, pattern, hidden=hidden, dirs=dirs, max_depth=max_depth, ignore=ignore, **kwargs)
+    "List a directory like `ls`: one level, directories included, ignore rules off, sorted by name. A root link to a directory lists that directory, with paths under the link."
+    res = _find(root, pattern, dirs=dirs, root_links=True, hidden=hidden, max_depth=max_depth, ignore=ignore, **kwargs)
     res.sort()
     return res
 
@@ -203,22 +211,23 @@ async def _acall(fn, *args):
 
 @delegates(fd)
 async def fda(
-    root:str|Path=".", # Directory or file to walk (expands `~`)
+    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
     timeout_ms:int|None=None, # Cancel the walk after this long and return partial results
+    show_target:bool=False, # Append `-> target` to symlink rows in the display
     **kwargs
 ) -> PathResults:
     "Async `fd`: find paths on Rust threads without blocking the event loop."
-    rt = Path(root).expanduser().absolute()
-    paths, timed_out = await _acall(_core.find_async, rt, pattern, *_walk_args(**kwargs), files, dirs, timeout_ms)
-    return _mk_results(PathResults, paths, False, timed_out, root=_path_base(rt, kwargs.get('follow_links', False)))
+    w = _walk(root, **kwargs)
+    paths, timed_out = await _acall(_core.find_async, w, pattern, files, dirs, timeout_ms)
+    return _mk_results(PathResults, paths, False, timed_out, root=_core.walk_base(w, False, False), show_target=show_target)
 
 
 @delegates(_walk_args)
 async def fda_iter(
-    root:str|Path=".", # Directory or file to walk (expands `~`)
+    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
@@ -226,10 +235,9 @@ async def fda_iter(
     **kwargs
 ):
     "Async `fd_iter`: yield absolute Paths; early exit stops the walk."
-    rt = Path(root).expanduser().absolute()
-    base = _path_base(rt, kwargs.get('follow_links', False))
-    async with aclosing(_abatches(_core.find_iter_async, batch_max, rt, pattern,
-        *_walk_args(**kwargs), files, dirs)) as batches:
+    w = _walk(root, **kwargs)
+    base = _core.walk_base(w, False, False)
+    async with aclosing(_abatches(_core.find_iter_async, batch_max, w, pattern, files, dirs)) as batches:
         async for paths in batches:
             for p in paths: yield base/p
 
@@ -258,7 +266,7 @@ def _mk_results(cls, items, capped, timed_out, **kwargs):
     return res
 
 
-def _paths_reduce(rows, root, max_results, timed_out=False):
+def _paths_reduce(rows, w, max_results, timed_out=False):
     "Unique matched paths as `PathResults` from rows with `kind`/`path`, capped at `max_results`"
     seen,res,capped = set(),[],False
     for row in rows:
@@ -268,20 +276,20 @@ def _paths_reduce(rows, root, max_results, timed_out=False):
             break
         seen.add(row.path)
         res.append(row.path)
-    return _mk_results(PathResults, res, capped, timed_out, root=_path_base(Path(root).resolve()))
+    return _mk_results(PathResults, res, capped, timed_out, root=_core.walk_base(w, True, False))
 
-def _rg_post(rows, paths, count, max_results, timed_out, root):
+def _rg_post(rows, paths, count, max_results, timed_out, w):
     "Reduce collected rows to the requested `rg`/`rga` result form"
     if count: return sum(len(r.matches) for r in rows if r.kind == "match")
     if not paths: return _mk_results(SearchResults, *_cap_rows(rows, max_results), timed_out)
-    return _paths_reduce(rows, root, max_results, timed_out)
+    return _paths_reduce(rows, w, max_results, timed_out)
 
 
 
 @delegates(_walk_args)
 def rg(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory or file to search (expands `~`)
+    root:str|Path|list=".", # Directory or file to search, or a list of them (expands `~`)
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     before_context:int=0, # Lines of context before each match, like `rg -B`
@@ -296,28 +304,34 @@ def rg(
     maxlen:int=MAXLEN, # Maximum source characters per displayed block
     **kwargs
 ):
-    "Search files and return `SearchResults`, matched paths, or a count; `lnhashs=True` shows exhash-style addresses."
+    """Search files and return `SearchResults`, matched paths, or a count; `lnhashs=True` shows exhash-style addresses.
+
+    `summary=True` returns one `SearchBlock` per block of lines separated by blank or whitespace-only lines, however many matches
+    it holds, and `context` then counts blocks. Summary mode can't combine with `paths` or `count`, and with `lnhashs=True` shows
+    each block's boundary addresses. `^` and `$` anchor each line, and a line ends at LF or CRLF. Patterns containing a newline or
+    carriage return are rejected. Row `path` fields are labels relative to the root, or to the common ancestor of several roots.
+    Each row has `asdict()`. A symlink named as `root` is followed."""
     assert not (paths and count), "paths and count are mutually exclusive"
     assert not (count and max_results), "count and max_results are mutually exclusive"
     assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
     assert not (summary and count), "summary and count are mutually exclusive"
     assert not (summary and paths), "summary and paths are mutually exclusive"
     before_context, after_context = _context(context, before_context, after_context)
-    rt = _fs_path(root)
-    args = (pattern, rt, *_walk_args(**kwargs), case_sensitive, smart_case, before_context, after_context)
+    w = _walk(root, **kwargs)
+    args = (w, pattern, case_sensitive, smart_case, before_context, after_context)
     if summary:
         rows,timed_out = _core.block_search(*args, timeout_ms)
         return _block_post(rows, max_results, before_context, after_context, timed_out, maxlen, lnhashs)
     if count: return sum(len(row.matches) for row in _core.rg_iter(*args, False) if row.kind == "match")
-    if paths and timeout_ms is None: return _paths_reduce(_core.rg_iter(*args, False), rt, max_results)
+    if paths and timeout_ms is None: return _paths_reduce(_core.rg_iter(*args, False), w, max_results)
     rows, timed_out = _core.rg(*args, lnhashs, timeout_ms)
-    return _rg_post(rows, paths, False, max_results, timed_out, rt)
+    return _rg_post(rows, paths, False, max_results, timed_out, w)
 
 
 @delegates(_walk_args)
 def rg_iter(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory or file to search (expands `~`)
+    root:str|Path|list=".", # Directory or file to search, or a list of them (expands `~`)
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     before_context:int=0, # Lines of context before each match, like `rg -B`
@@ -328,14 +342,13 @@ def rg_iter(
 ) -> RgIter:
     "Search files lazily, yielding `SearchLine` rows; `lnhashs=True` shows exhash-style addresses."
     before_context, after_context = _context(context, before_context, after_context)
-    return _core.rg_iter(pattern, _fs_path(root), *_walk_args(**kwargs),
-        case_sensitive, smart_case, before_context, after_context, lnhashs)
+    return _core.rg_iter(_walk(root, **kwargs), pattern, case_sensitive, smart_case, before_context, after_context, lnhashs)
 
 
 @delegates(_walk_args)
 async def rga(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory or file to search (expands `~`)
+    root:str|Path|list=".", # Directory or file to search, or a list of them (expands `~`)
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     before_context:int=0, # Lines of context before each match, like `rg -B`
@@ -357,13 +370,13 @@ async def rga(
     assert not (summary and count), "summary and count are mutually exclusive"
     assert not (summary and paths), "summary and paths are mutually exclusive"
     before_context, after_context = _context(context, before_context, after_context)
-    rt = _fs_path(root)
-    args = (pattern, rt, *_walk_args(**kwargs), case_sensitive, smart_case, before_context, after_context)
+    w = _walk(root, **kwargs)
+    args = (w, pattern, case_sensitive, smart_case, before_context, after_context)
     if summary:
         rows,timed_out = await _acall(_core.block_search_async, *args, timeout_ms)
         return _block_post(rows, max_results, before_context, after_context, timed_out, maxlen, lnhashs)
     rows, timed_out = await _acall(_core.rg_async, *args, lnhashs, timeout_ms)
-    return _rg_post(rows, paths, count, max_results, timed_out, rt)
+    return _rg_post(rows, paths, count, max_results, timed_out, w)
 
 
 
@@ -387,7 +400,7 @@ async def _abatches(fn, *args):
 @delegates(_walk_args)
 async def rga_iter(
     pattern:str, # Regex pattern to search for
-    root:str|Path=".", # Directory or file to search (expands `~`)
+    root:str|Path|list=".", # Directory or file to search, or a list of them (expands `~`)
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False, # Match `rg --smart-case` behavior
     before_context:int=0, # Lines of context before each match, like `rg -B`
@@ -399,7 +412,7 @@ async def rga_iter(
 ):
     "Async `rg_iter`: yield `SearchLine` rows as they are found; early exit cancels the search."
     before_context, after_context = _context(context, before_context, after_context)
-    async with aclosing(_abatches(_core.rg_iter_async, batch_max, pattern, _fs_path(root), *_walk_args(**kwargs),
+    async with aclosing(_abatches(_core.rg_iter_async, batch_max, _walk(root, **kwargs), pattern,
         case_sensitive, smart_case, before_context, after_context, lnhashs)) as batches:
         async for rows in batches:
             for row in rows: yield row

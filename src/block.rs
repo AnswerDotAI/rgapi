@@ -8,7 +8,7 @@ use ignore::{DirEntry, WalkState};
 
 use crate::RgApiError;
 use crate::search::{RgOptions, SearchLine, compile_regex, format_lnhash, search_text};
-use crate::walk::{PathFilters, StreamIter, entry_err, file_root_flags, normalize_root, rel_path, spawn_walk};
+use crate::walk::{PathFilters, StreamIter, entry_err, rel_path, resolve_roots, spawn_walk};
 
 /// One blank-line-delimited block containing a match, or context for one.
 pub struct SearchBlock {
@@ -85,7 +85,7 @@ fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, before_conte
 
 fn block_entry(
     entry: Result<DirEntry, ignore::Error>,
-    root: &Path,
+    base: &Path,
     filters: &PathFilters,
     matcher: &RegexMatcher,
     before_context: usize,
@@ -96,7 +96,7 @@ fn block_entry(
     let path = dent.path();
     let Some(ft) = dent.file_type() else { return Ok(Vec::new()); };
     if !ft.is_file() { return Ok(Vec::new()); }
-    let rel = rel_path(root, path);
+    let rel = rel_path(base, path);
     if !filters.path_allowed(Path::new(&rel)) { return Ok(Vec::new()); }
     let bytes = match std::fs::read(path) { Ok(bytes) => bytes, Err(_) => return Ok(Vec::new()) };
     process_file(rel, &bytes, matcher, before_context, after_context)
@@ -105,30 +105,17 @@ fn block_entry(
 pub type BlockIter = StreamIter<SearchBlock>;
 
 pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
-    let (ignore, hidden) = file_root_flags(&opts.root, opts.ignore, opts.hidden);
-    let root = normalize_root(&opts.root)?;
-    let filters = Arc::new(PathFilters::new(
-        &opts.includes,
-        &opts.excludes,
-        &opts.exts,
-        opts.path_re.as_deref(),
-        opts.skip_path_re.as_deref(),
-        &opts.skip_dirs,
-        opts.skip_dir_re.as_deref(),
-    )?);
+    let (roots, base) = resolve_roots(&opts.walk, true, false)?;
+    let filters = Arc::new(PathFilters::new(&opts.walk)?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, false)?;
-    let (before_context, after_context, max_depth) = (opts.before_context, opts.after_context, opts.max_depth);
+    let (before_context, after_context, max_depth) = (opts.before_context, opts.after_context, opts.walk.max_depth);
     Ok(spawn_walk(
-        root,
-        ignore,
-        hidden,
-        opts.max_depth,
-        opts.min_depth,
-        opts.max_filesize,
-        opts.follow_links,
-        opts.same_file_system,
+        roots,
+        base,
+        &opts.walk,
         filters,
-        move |dent, root, filters, tx, cancel| match block_entry(dent, root, filters, &matcher, before_context, after_context, max_depth) {
+        Vec::new(),
+        move |dent, base, filters, tx, cancel| match block_entry(dent, base, filters, &matcher, before_context, after_context, max_depth) {
             Ok(blocks) => {
                 for block in blocks { if cancel.load(Ordering::Relaxed) || tx.send(Ok(block)).is_err() { return WalkState::Quit; } }
                 WalkState::Continue

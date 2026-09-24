@@ -4,7 +4,12 @@ from . import MAXLEN, _Results, _mk_results, _preview
 
 
 class SearchBlock:
-    "A blank-line-delimited source block containing a match, or context for one."
+    """A blank-line-delimited source block containing a match, or context for one.
+
+    Fields: `path`, `block_index`, `start_line`, `end_line`, `start_lnhash`, `end_lnhash`, `kind` (match or context), the full
+    `source`, and `matches` as matching `SearchLine`s. The display is `path:start-end:source`, with `-` in place of the last colon
+    on context rows. Hashed locations are `start_lnhash,end_lnhash`, or one hash for a single line. Newline runs display as ¶,
+    keeping indentation. `maxlen` limits the displayed source, not the stored `source`."""
     def __init__(self, path, block_index, start_line, end_line, start_lnhash, end_lnhash, kind, source, matches, maxlen=MAXLEN, display_lnhash=False):
         self.path,self.block_index,self.start_line,self.end_line = path,block_index,start_line,end_line
         self.start_lnhash,self.end_lnhash,self.display_lnhash = start_lnhash,end_lnhash,display_lnhash
