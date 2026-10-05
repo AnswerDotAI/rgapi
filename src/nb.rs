@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
-use std::sync::{Arc, LazyLock};
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, LazyLock};
 
 use grep_matcher::{Captures, Matcher};
 use grep_regex::RegexMatcher;
@@ -47,10 +47,8 @@ fn sigil_caps(text: &str, sigil: &str, body: &str) -> Vec<String> {
     let re = RegexMatcher::new(&format!("{sigil}`({body})`")).expect("sigil pattern compiles");
     let mut caps = re.new_captures().expect("captures allocate");
     let mut res = Vec::new();
-    re.captures_iter(text.as_bytes(), &mut caps, |c| {
-        if let Some(m) = c.get(1) { res.push(text[m.start()..m.end()].to_string()); }
-        true
-    }).expect("regex search is infallible");
+    re.captures_iter(text.as_bytes(), &mut caps, |c| { if let Some(m) = c.get(1) { res.push(text[m.start()..m.end()].to_string()); } true })
+    .expect("regex search is infallible");
     res
 }
 
@@ -85,7 +83,10 @@ pub fn cell_refs(cell: &serde_json::Value) -> CellRefs {
     let prompt = cell["metadata"]["solveit_ai"] == true;
     let mut res = CellRefs::default();
     if prompt { (res.vars, res.cmds) = (sigil_caps(&src, r"\$", "[^`]+"), sigil_caps(&src, "!", "[^`]+")); }
-    if prompt || cell["cell_type"] == "markdown" { res.tools = tool_names(&src); return res; }
+    if prompt || cell["cell_type"] == "markdown" {
+        res.tools = tool_names(&src);
+        return res;
+    }
     for o in cell["outputs"].as_array().into_iter().flatten() {
         if matches!(o["output_type"].as_str(), Some("display_data" | "execute_result")) { res.tools.extend(tool_names(&nb_text(&o["data"]["text/markdown"]))); }
     }
@@ -222,13 +223,8 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
     let filters = Arc::new(PathFilters::new(&opts.walk)?);
     let matcher = compile_nb_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, opts.multiline)?;
     let (cell_context, multiline, max_depth) = (opts.cell_context, opts.multiline, opts.walk.max_depth);
-    Ok(spawn_walk(
-        roots,
-        base,
-        &opts.walk,
-        filters,
-        Vec::new(),
-        move |dent, base, filters, tx, cancel| match nb_entry(dent, base, filters, &matcher, cell_context, multiline, max_depth) {
+    Ok(spawn_walk(roots, base, &opts.walk, filters, Vec::new(), move |dent, base, filters, tx, cancel| {
+        match nb_entry(dent, base, filters, &matcher, cell_context, multiline, max_depth) {
             Ok(cells) => {
                 for cell in cells { if cancel.load(Ordering::Relaxed) || tx.send(Ok(cell)).is_err() { return WalkState::Quit; } }
                 WalkState::Continue
@@ -237,8 +233,8 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
                 let _ = tx.send(Err(err));
                 WalkState::Quit
             }
-        },
-    ))
+        }
+    }))
 }
 
 pub fn nb_search(opts: &NbOptions) -> Result<Vec<NbCell>, RgApiError> { nb_iter(opts)?.collect() }

@@ -109,13 +109,8 @@ pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
     let filters = Arc::new(PathFilters::new(&opts.walk)?);
     let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, false)?;
     let (before_context, after_context, max_depth) = (opts.before_context, opts.after_context, opts.walk.max_depth);
-    Ok(spawn_walk(
-        roots,
-        base,
-        &opts.walk,
-        filters,
-        Vec::new(),
-        move |dent, base, filters, tx, cancel| match block_entry(dent, base, filters, &matcher, before_context, after_context, max_depth) {
+    Ok(spawn_walk(roots, base, &opts.walk, filters, Vec::new(), move |dent, base, filters, tx, cancel| {
+        match block_entry(dent, base, filters, &matcher, before_context, after_context, max_depth) {
             Ok(blocks) => {
                 for block in blocks { if cancel.load(Ordering::Relaxed) || tx.send(Ok(block)).is_err() { return WalkState::Quit; } }
                 WalkState::Continue
@@ -124,6 +119,6 @@ pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
                 let _ = tx.send(Err(err));
                 WalkState::Quit
             }
-        },
-    ))
+        }
+    }))
 }

@@ -97,10 +97,7 @@ fn search_entry(
 
 fn is_cancelled(cancel: &Arc<AtomicBool>) -> bool { cancel.load(Ordering::Relaxed) }
 
-fn send_search_error(tx: &SyncSender<Result<SearchLine, RgApiError>>, err: RgApiError) -> WalkState {
-    let _ = tx.send(Err(err));
-    WalkState::Quit
-}
+fn send_search_error(tx: &SyncSender<Result<SearchLine, RgApiError>>, err: RgApiError) -> WalkState { let _ = tx.send(Err(err)); WalkState::Quit }
 
 pub fn compile_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: bool, multiline: bool) -> Result<RegexMatcher, RgApiError> {
     if pattern.is_empty() { return Err(RgApiError::new("pattern may not be empty")); }
@@ -146,7 +143,12 @@ fn search_path_cancelable(
     cancel: Option<Arc<AtomicBool>>,
 ) -> Result<Vec<SearchLine>, RgApiError> {
     let mut builder = SearcherBuilder::new();
-    builder.line_number(true).line_terminator(LineTerminator::crlf()).before_context(before_context).after_context(after_context).binary_detection(BinaryDetection::quit(0));
+    builder
+        .line_number(true)
+        .line_terminator(LineTerminator::crlf())
+        .before_context(before_context)
+        .after_context(after_context)
+        .binary_detection(BinaryDetection::quit(0));
     let mut searcher = builder.build();
     let mut out = Vec::new();
     let search_matcher = matcher.clone();
@@ -222,14 +224,12 @@ impl Sink for CollectSink<'_> {
         self.lines.push(SearchLine { kind, path: self.path.clone(), line_number, lnhash: format_lnhash(line_number, &line), line, matches: Vec::new() });
         Ok(!self.cancelled())
     }
-    fn binary_data(&mut self, _searcher: &grep_searcher::Searcher, _binary_byte_offset: u64) -> Result<bool, Self::Error> {
-        self.lines.clear();
-        Ok(false)
-    }
+    fn binary_data(&mut self, _searcher: &grep_searcher::Searcher, _binary_byte_offset: u64) -> Result<bool, Self::Error> { self.lines.clear(); Ok(false) }
 }
 
 #[derive(Debug)]
-pub(crate) enum SearchError { Message(String), InvalidUtf8 }
+/// A search failure, including invalid UTF-8 in matched text.
+pub enum SearchError { Message(String), InvalidUtf8 }
 impl std::fmt::Display for SearchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self { Self::Message(msg) => write!(f, "{msg}"), Self::InvalidUtf8 => write!(f, "invalid utf-8") }
@@ -241,13 +241,11 @@ fn bytes_to_line(bytes: &[u8]) -> Result<String, SearchError> {
     let s = std::str::from_utf8(bytes).map_err(|_| SearchError::InvalidUtf8)?;
     Ok(s.trim_end_matches(['\r', '\n']).to_string())
 }
-pub(crate) fn spans_for(matcher: &RegexMatcher, bytes: &[u8]) -> Result<Vec<MatchSpan>, SearchError> {
+/// Return byte offsets for every match in a line.
+pub fn spans_for(matcher: &RegexMatcher, bytes: &[u8]) -> Result<Vec<MatchSpan>, SearchError> {
     let mut spans = Vec::new();
     matcher
-        .find_iter(bytes, |m| {
-            spans.push(MatchSpan { start: m.start(), end: m.end() });
-            true
-        })
+        .find_iter(bytes, |m| { spans.push(MatchSpan { start: m.start(), end: m.end() }); true })
         .map_err(|e| SearchError::Message(e.to_string()))?;
     Ok(spans)
 }

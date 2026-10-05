@@ -1,7 +1,19 @@
-[package]
-name = "rgapi"
+[workspace]
+members = ["py"]
+default-members = [".", "py"]
+
+[workspace.package]
 version = "0.2.1"
 edition = "2024"
+
+[workspace.dependencies]
+grep-matcher = ">=0.1.8"
+grep-regex = ">=0.1.14"
+
+[package]
+name = "rgapi"
+version.workspace = true
+edition.workspace = true
 rust-version = "1.91"
 license = "Apache-2.0"
 description = "Python API for ripgrep-style file walking and searching"
@@ -11,31 +23,31 @@ documentation = "https://github.com/AnswerDotAI/rgapi"
 
 [lib]
 name = "rgapi"
-crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 crc32fast = "1"
 globset = ">=0.4.18"
-grep-matcher = ">=0.1.8"
-grep-regex = ">=0.1.14"
+grep-matcher.workspace = true
+grep-regex.workspace = true
 grep-searcher = ">=0.1.16"
 ignore = ">=0.4.26"
-pyo3 = { version = ">=0.28", optional = true }
 serde = { version = "=1", features = ["derive"] }
 serde_json = "=1"
 
-[features]
-python = ["dep:pyo3"]
-extension-module = ["python", "pyo3/extension-module"]
-
 [lints.clippy]
 too_many_arguments = "allow"
+
+[profile.test]
+inherits = "release"
 
 [profile.release]
 lto = false
 codegen-units = 16
 
 [profile.release.package.rgapi]
+incremental = true
+
+[profile.release.package.rgapi-py]
 incremental = true
 
 [profile.dist]
@@ -46,4 +58,7 @@ codegen-units = 1
 strip = true
 
 [profile.dist.package.rgapi]
+incremental = false
+
+[profile.dist.package.rgapi-py]
 incremental = false

@@ -5,13 +5,10 @@ mod nb;
 mod search;
 mod walk;
 
-#[cfg(feature = "python")]
-mod python;
-
 pub use block::{BlockIter, SearchBlock, block_iter};
 pub use nb::{CellRefs, NbCell, NbIter, NbOptions, ancestor_indices, cell_refs, heading_level, nb_iter, nb_search, nb_search_file, section_range};
-pub use search::{MatchSpan, RgIter, RgOptions, SearchKind, SearchLine, compile_regex, rg, rg_iter, search_path, search_text};
-pub use walk::{FindIter, FindOptions, StreamIter, WalkOptions, find, find_iter};
+pub use search::{MatchSpan, RgIter, RgOptions, SearchError, SearchKind, SearchLine, compile_regex, rg, rg_iter, search_path, search_text, spans_for};
+pub use walk::{FindIter, FindOptions, StreamIter, WalkOptions, find, find_iter, find_iter_with, resolve_roots};
 
 #[derive(Debug, Clone)]
 pub struct RgApiError { msg: String }

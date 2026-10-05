@@ -8,7 +8,7 @@
 src/walk.rs       ignore/globset/grep-regex-backed path walking and filtering
 src/search.rs     grep-regex/grep-searcher-backed searching
 src/block.rs      blank-line-delimited block grouping, matching, and block context
-src/python.rs     PyO3 classes and private core functions
+py/src/lib.rs     PyO3 classes and private core functions
 python/rgapi/     public Python wrappers over `rgapi._core`, plus the `rgapi-nbrg` CLI
 tests/            pytest coverage for the Python API
 ```
@@ -18,11 +18,11 @@ The public Python API lives in `python/rgapi/__init__.py`. The extension module 
 ## Commands
 
 ```bash
-maturin develop
+cargo develop
 pytest -q
 ```
 
-Python tests (`tests/`) run against the built extension. `cargo test` covers the Rust-only API, and takes no feature flags: `extension-module` stops pyo3 linking libpython, which a test binary needs. For a fast local loop use `maturin develop && pytest -q`. Run `cargo fmt --check` and `cargo check --all-features` for Rust-only edits. Run `chkstyle` after Python edits once tests pass.
+`cargo develop` and bare `cargo test` use the same Cargo profile and share the core and binding libraries. Unit tests also build a separate `cfg(test)` executable. The published `rgapi` crate has no Python dependency; the unpublished `rgapi-py` crate in `py/` builds the extension. Run `cargo fmt` after Rust edits and `chkstyle` before committing Python edits.
 
 ## Release
 
@@ -30,8 +30,8 @@ The canonical version lives in `Cargo.toml`. `pyproject.toml` gets the Python pa
 
 Release flow is: release first, then bump - `ship-release` does both.
 
-1. Run `maturin develop && pytest -q`.
-2. Confirm the release version in `Cargo.toml` (`[package].version`).
+1. Run `cargo develop && pytest -q`.
+2. Confirm the release version in `Cargo.toml` (`[workspace.package].version`).
 3. Run `ship-release`. It tags `v<version>`, pushes branch and tag (CI builds and publishes), then bumps `Cargo.toml`, refreshes the editable install, and pushes the bump without a tag.
 
 The GitHub workflow builds wheels for Python 3.10-3.13 on Linux and macOS and publishes the Rust crate, GitHub release artifacts, and PyPI package when a `v*` tag is pushed.

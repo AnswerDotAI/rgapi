@@ -17,7 +17,7 @@ classifiers = [
 dependencies = ["fastcore>=2.2.29"]
 
 [project.optional-dependencies]
-dev = ["fastship>=0.0.12", "maturin>=1.0,<2.0", "pytest"]
+dev = ["fastws-cli>=0.0.20", "fastship>=0.0.12", "maturin>=1.0,<2.0", "pytest"]
 
 [project.urls]
 Homepage = "https://github.com/AnswerDotAI/rgapi"
@@ -34,12 +34,12 @@ rgapi = "rgapi"
 rgapi-nbrg = "rgapi._cli:nbrg_cli"
 
 [tool.maturin]
-features = ["extension-module"]
+manifest-path = "py/Cargo.toml"
 python-source = "python"
 module-name = "rgapi._core"
 
 [tool.uv]
-cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.rs" }, { file = "Cargo.toml" }, { file = ".git/fastws-cargo-key" }]
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "py/Cargo.toml" }]
 
 [tool.fastship]
 branch = "main"

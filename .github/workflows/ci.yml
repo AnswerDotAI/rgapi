@@ -12,11 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+      - run: cargo test
       - run: pip install -e '.[dev]'
+      - run: cargo develop
       - run: pytest -q
 
   build:
@@ -61,7 +62,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - id: crates-auth
         uses: rust-lang/crates-io-auth-action@v1
-      - run: cargo publish
+      - run: cargo publish -p rgapi
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
       - uses: actions/download-artifact@v8

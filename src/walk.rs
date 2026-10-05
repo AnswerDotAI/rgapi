@@ -13,7 +13,6 @@ use crate::RgApiError;
 
 /// Where to walk and which paths to keep. `FindOptions`, `RgOptions` and `NbOptions` each hold one.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "python", derive(pyo3::FromPyObject), pyo3(from_item_all))]
 pub struct WalkOptions {
     /// Directories or files to walk. Result paths are relative to the base of the roots. Filters match the same relative paths.
     /// A directory root is its own base. A file root, or a link root that is not followed, has its parent as its base.
@@ -80,38 +79,29 @@ pub fn find_iter(opts: &FindOptions) -> Result<FindIter, RgApiError> { find_iter
 
 /// Like `find_iter`, except that `walk_root_links` walks a root link to a directory instead of returning the link.
 /// Paths under that root are reported under the link.
-pub(crate) fn find_iter_with(opts: &FindOptions, walk_root_links: bool) -> Result<FindIter, RgApiError> {
+pub fn find_iter_with(opts: &FindOptions, walk_root_links: bool) -> Result<FindIter, RgApiError> {
     let walk = &opts.walk;
     let (roots, base) = resolve_roots(walk, false, walk_root_links)?;
     let filters = Arc::new(PathFilters::new(walk)?);
     let pattern = opts.pattern.as_deref().map(build_fd_re).transpose()?;
     // The walker follows every root it is given. A link root returned as itself must not reach it.
     let (links, roots): (Vec<_>, Vec<_>) = roots.into_iter().partition(|r| r.is_symlink() && !walk.follow_links && !(walk_root_links && r.is_dir()));
-    let ready = if walk.min_depth.unwrap_or(0) > 0 { Vec::new() } else {
-        links.iter().map(|r| relative_path(&base, r)).filter(|rel| find_matches(rel, &filters, pattern.as_ref())).map(Path::to_path_buf).collect()
-    };
+    let ready = if walk.min_depth.unwrap_or(0) > 0 { Vec::new() } else { links.iter().map(|r| relative_path(&base, r)).filter(|rel| find_matches(rel, &filters, pattern.as_ref())).map(Path::to_path_buf).collect() };
     let (files, dirs, special_files, panic_probe, max_depth) = (opts.files, opts.dirs, opts.special_files, opts.panic_probe, walk.max_depth);
-    Ok(spawn_walk(
-        roots,
-        base,
-        walk,
-        filters,
-        ready,
-        move |dent, base, filters, tx, cancel| {
-            if panic_probe { panic!("rgapi: deliberate panic for tests (panic_probe)"); }
-            match find_entry(dent, base, filters, pattern.as_ref(), files, dirs, special_files, max_depth) {
-                Ok(Some(path)) => {
-                    if cancel.load(Ordering::Relaxed) || tx.send(Ok(path)).is_err() { return WalkState::Quit; }
-                    WalkState::Continue
-                }
-                Ok(None) => WalkState::Continue,
-                Err(err) => {
-                    let _ = tx.send(Err(err));
-                    WalkState::Quit
-                }
+    Ok(spawn_walk(roots, base, walk, filters, ready, move |dent, base, filters, tx, cancel| {
+        if panic_probe { panic!("rgapi: deliberate panic for tests (panic_probe)"); }
+        match find_entry(dent, base, filters, pattern.as_ref(), files, dirs, special_files, max_depth) {
+            Ok(Some(path)) => {
+                if cancel.load(Ordering::Relaxed) || tx.send(Ok(path)).is_err() { return WalkState::Quit; }
+                WalkState::Continue
             }
-        },
-    ))
+            Ok(None) => WalkState::Continue,
+            Err(err) => {
+                let _ = tx.send(Err(err));
+                WalkState::Quit
+            }
+        }
+    }))
 }
 
 pub struct StreamIter<T> { rx: mpsc::Receiver<Result<T, RgApiError>>, cancel: Arc<AtomicBool>, worker: Option<std::thread::JoinHandle<()>> }
@@ -211,7 +201,9 @@ where
                 let (tx, base, filters, cancel, entry, seen) = (tx.clone(), base.clone(), filters.clone(), worker_cancel.clone(), entry.clone(), seen.clone());
                 Box::new(move |dent| {
                     if cancel.load(Ordering::Relaxed) { return WalkState::Quit; }
-                    if let (Some(seen), Ok(d)) = (&seen, &dent) && !seen.lock().unwrap().insert(d.path().to_path_buf()) { return WalkState::Continue; }
+                    if let (Some(seen), Ok(d)) = (&seen, &dent)
+                        && !seen.lock().unwrap().insert(d.path().to_path_buf())
+                    { return WalkState::Continue; }
                     catch_unwind(AssertUnwindSafe(|| entry(dent, &base, &filters, &tx, &cancel))).unwrap_or_else(|_| {
                         let _ = tx.send(Err(RgApiError::new("internal error during search (this is a bug, please report it)")));
                         WalkState::Quit
@@ -263,9 +255,7 @@ fn dangling_link(err: &ignore::Error) -> Option<&Path> {
 }
 
 fn find_matches(path: &Path, filters: &PathFilters, pattern: Option<&RegexMatcher>) -> bool {
-    if let Some(pattern) = pattern {
-        if !re_match(pattern, &path.file_name().unwrap_or_default().to_string_lossy()) { return false; }
-    }
+    if let Some(pattern) = pattern { if !re_match(pattern, &path.file_name().unwrap_or_default().to_string_lossy()) { return false; } }
     filters.path_allowed(path)
 }
 
@@ -288,14 +278,19 @@ fn normalize_root(path: &Path) -> Result<PathBuf, RgApiError> {
 }
 
 /// Return the distinct roots and their base. Each root is made absolute. With `canonical`, each root is also canonicalized.
-pub(crate) fn resolve_roots(walk: &WalkOptions, canonical: bool, walk_root_links: bool) -> Result<(Vec<PathBuf>, PathBuf), RgApiError> {
+pub fn resolve_roots(walk: &WalkOptions, canonical: bool, walk_root_links: bool) -> Result<(Vec<PathBuf>, PathBuf), RgApiError> {
     let mut roots = Vec::new();
     for root in &walk.roots {
-        let root = if canonical { normalize_root(root)? } else { let r = std::path::absolute(root)?; r.symlink_metadata()?; r };
+        let root = if canonical { normalize_root(root)? } else {
+            let r = std::path::absolute(root)?;
+            r.symlink_metadata()?;
+            r
+        };
         if !roots.contains(&root) { roots.push(root); }
     }
     let follow = walk.follow_links || walk_root_links;
-    let mut bases = roots.iter().map(|r| if (follow || !r.is_symlink()) && r.is_dir() { r.clone() } else { r.parent().map_or_else(|| r.clone(), Path::to_path_buf) });
+    let mut bases =
+        roots.iter().map(|r| if (follow || !r.is_symlink()) && r.is_dir() { r.clone() } else { r.parent().map_or_else(|| r.clone(), Path::to_path_buf) });
     let mut base = bases.next().unwrap_or_default();
     for b in bases { while !b.starts_with(&base) && base.pop() {} }
     Ok((roots, base))
@@ -416,8 +411,12 @@ mod tests {
 
     #[test]
     fn globs_match_names_or_root_relative_components() {
-        for (glob, yes, no) in [("*.py", "src/deep/app.py", "src/app.rs"), ("src/*", "src/app.py", "src/deep/app.py"),
-            ("src/**", "src/deep/app.py", "other/src/app.py"), ("tests", "src/tests", "src/tests/app.py")] {
+        for (glob, yes, no) in [
+            ("*.py", "src/deep/app.py", "src/app.rs"),
+            ("src/*", "src/app.py", "src/deep/app.py"),
+            ("src/**", "src/deep/app.py", "other/src/app.py"),
+            ("tests", "src/tests", "src/tests/app.py"),
+        ] {
             let globs = build_globs(&[glob.into()]).unwrap().unwrap();
             assert!(globs.is_match(yes), "{glob}: {yes}");
             assert!(!globs.is_match(no), "{glob}: {no}");
@@ -428,10 +427,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let worker = std::thread::spawn(move || {
-            for i in items {
-                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                if tx.send(Ok(i)).is_err() { return; }
-            }
+            for i in items { std::thread::sleep(std::time::Duration::from_millis(delay_ms)); if tx.send(Ok(i)).is_err() { return; } }
         });
         StreamIter { rx, cancel, worker: Some(worker) }
     }
