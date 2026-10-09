@@ -6,10 +6,9 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use grep_matcher::Matcher;
-use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use ignore::{DirEntry, WalkBuilder, WalkState};
 
-use crate::RgApiError;
+use crate::{RegexMatcher, RgApiError};
 
 /// Where to walk and which paths to keep. `FindOptions`, `RgOptions` and `NbOptions` each hold one.
 #[derive(Debug, Clone)]
@@ -83,10 +82,13 @@ pub fn find_iter_with(opts: &FindOptions, walk_root_links: bool) -> Result<FindI
     let walk = &opts.walk;
     let (roots, base) = resolve_roots(walk, false, walk_root_links)?;
     let filters = Arc::new(PathFilters::new(walk)?);
-    let pattern = opts.pattern.as_deref().map(build_fd_re).transpose()?;
+    let pattern = opts.pattern.as_deref().map(|p| RegexMatcher::path(p, true)).transpose()?;
     // The walker follows every root it is given. A link root returned as itself must not reach it.
     let (links, roots): (Vec<_>, Vec<_>) = roots.into_iter().partition(|r| r.is_symlink() && !walk.follow_links && !(walk_root_links && r.is_dir()));
-    let ready = if walk.min_depth.unwrap_or(0) > 0 { Vec::new() } else { links.iter().map(|r| relative_path(&base, r)).filter(|rel| find_matches(rel, &filters, pattern.as_ref())).map(Path::to_path_buf).collect() };
+    let mut ready = Vec::new();
+    if walk.min_depth.unwrap_or(0) == 0 {
+        for link in links { let rel = relative_path(&base, &link); if find_matches(rel, &filters, pattern.as_ref())? { ready.push(rel.to_path_buf()); } }
+    }
     let (files, dirs, special_files, panic_probe, max_depth) = (opts.files, opts.dirs, opts.special_files, opts.panic_probe, walk.max_depth);
     Ok(spawn_walk(roots, base, walk, filters, ready, move |dent, base, filters, tx, cancel| {
         if panic_probe { panic!("rgapi: deliberate panic for tests (panic_probe)"); }
@@ -196,7 +198,7 @@ where
             if worker_cancel.load(Ordering::Relaxed) { return; }
             let mut walker = WalkBuilder::new(root);
             configure_walker(&mut walker, root, &walk);
-            filter_dirs(&mut walker, &base, filters.clone());
+            filter_dirs(&mut walker, &base, filters.clone(), tx.clone(), worker_cancel.clone());
             walker.build_parallel().run(|| {
                 let (tx, base, filters, cancel, entry, seen) = (tx.clone(), base.clone(), filters.clone(), worker_cancel.clone(), entry.clone(), seen.clone());
                 Box::new(move |dent| {
@@ -230,7 +232,7 @@ fn find_entry(
         Err(err) => {
             if let Some(path) = dangling_link(&err) {
                 let rel = relative_path(base, path);
-                return Ok(find_matches(rel, filters, pattern).then(|| rel.to_path_buf()));
+                return Ok(find_matches(rel, filters, pattern)?.then(|| rel.to_path_buf()));
             }
             return entry_err(err, max_depth).map_or(Ok(None), Err);
         }
@@ -242,7 +244,7 @@ fn find_entry(
     if ft.is_dir() && !dirs { return Ok(None); }
     if !ft.is_file() && !ft.is_dir() && !ft.is_symlink() && !special_files { return Ok(None); }
     let rel = relative_path(base, path);
-    Ok(find_matches(rel, filters, pattern).then(|| rel.to_path_buf()))
+    Ok(find_matches(rel, filters, pattern)?.then(|| rel.to_path_buf()))
 }
 
 // With `follow_links` the walker reports a dangling link as an error; it is a dangling link when the path is a symlink whose target is missing.
@@ -254,8 +256,8 @@ fn dangling_link(err: &ignore::Error) -> Option<&Path> {
     }
 }
 
-fn find_matches(path: &Path, filters: &PathFilters, pattern: Option<&RegexMatcher>) -> bool {
-    if let Some(pattern) = pattern { if !re_match(pattern, &path.file_name().unwrap_or_default().to_string_lossy()) { return false; } }
+fn find_matches(path: &Path, filters: &PathFilters, pattern: Option<&RegexMatcher>) -> Result<bool, RgApiError> {
+    if let Some(pattern) = pattern { if !re_match(pattern, &path.file_name().unwrap_or_default().to_string_lossy())? { return Ok(false); } }
     filters.path_allowed(path)
 }
 
@@ -318,9 +320,12 @@ fn configure_walker(walker: &mut WalkBuilder, root: &Path, walk: &WalkOptions) {
     walker.same_file_system(walk.same_file_system);
 }
 
-fn filter_dirs(walker: &mut WalkBuilder, base: &Path, filters: Arc<PathFilters>) {
+fn filter_dirs<T: Send + 'static>(walker: &mut WalkBuilder, base: &Path, filters: Arc<PathFilters>, tx: mpsc::SyncSender<Result<T, RgApiError>>, cancel: Arc<AtomicBool>) {
     let base = base.to_path_buf();
-    walker.filter_entry(move |entry| filters.entry_allowed(&base, entry));
+    walker.filter_entry(move |entry| if cancel.load(Ordering::Relaxed) { false } else { match filters.entry_allowed(&base, entry) {
+        Ok(allowed) => allowed,
+        Err(err) => { let _ = tx.send(Err(err)); false }
+    } });
 }
 
 pub(crate) struct PathFilters {
@@ -346,37 +351,37 @@ impl PathFilters {
         })
     }
 
-    pub(crate) fn path_allowed(&self, path: &Path) -> bool {
+    pub(crate) fn path_allowed(&self, path: &Path) -> Result<bool, RgApiError> {
         if let Some(excludes) = &self.excludes
             && excludes.is_match(path)
-        { return false; }
+        { return Ok(false); }
         if let Some(skip_path_re) = &self.skip_path_re
-            && re_match(skip_path_re, &path_label(path))
-        { return false; }
+            && re_match(skip_path_re, &path_label(path))?
+        { return Ok(false); }
         if let Some(path_re) = &self.path_re
-            && !re_match(path_re, &path_label(path))
-        { return false; }
+            && !re_match(path_re, &path_label(path))?
+        { return Ok(false); }
         if let Some(exts) = &self.exts
             && !exts.is_match(path)
-        { return false; }
-        if let Some(includes) = &self.includes { return includes.is_match(path); }
-        true
+        { return Ok(false); }
+        if let Some(includes) = &self.includes { return Ok(includes.is_match(path)); }
+        Ok(true)
     }
 
-    fn entry_allowed(&self, base: &Path, dent: &DirEntry) -> bool {
+    fn entry_allowed(&self, base: &Path, dent: &DirEntry) -> Result<bool, RgApiError> {
         let path = dent.path();
-        if dent.depth() == 0 { return true; }
-        let Some(ft) = dent.file_type() else { return true; };
-        if !ft.is_dir() { return true; }
+        if dent.depth() == 0 { return Ok(true); }
+        let Some(ft) = dent.file_type() else { return Ok(true); };
+        if !ft.is_dir() { return Ok(true); }
         let rel = relative_path(base, path);
-        if self.excludes.as_ref().is_some_and(|globs| globs.is_match(rel)) { return false; }
+        if self.excludes.as_ref().is_some_and(|globs| globs.is_match(rel)) { return Ok(false); }
         if let Some(skip_dirs) = &self.skip_dirs
             && skip_dirs.is_match(rel)
-        { return false; }
+        { return Ok(false); }
         if let Some(skip_dir_re) = &self.skip_dir_re
-            && re_match(skip_dir_re, &path_label(rel))
-        { return false; }
-        true
+            && re_match(skip_dir_re, &path_label(rel))?
+        { return Ok(false); }
+        Ok(true)
     }
 }
 
@@ -393,17 +398,11 @@ fn add_glob(builder: &mut GlobSetBuilder, glob: &str) -> Result<(), RgApiError> 
     Ok(())
 }
 
-fn build_fd_re(pattern: &str) -> Result<RegexMatcher, RgApiError> {
-    let mut builder = RegexMatcherBuilder::new();
-    builder.case_smart(true);
-    builder.build(pattern).map_err(|e| RgApiError::new(e.to_string()))
-}
-
 fn build_path_re(pattern: Option<&str>) -> Result<Option<RegexMatcher>, RgApiError> {
-    pattern.map(|pattern| RegexMatcherBuilder::new().build(pattern).map_err(|e| RgApiError::new(e.to_string()))).transpose()
+    pattern.map(|pattern| RegexMatcher::path(pattern, false)).transpose()
 }
 
-fn re_match(matcher: &RegexMatcher, rel: &str) -> bool { matcher.is_match(rel.as_bytes()).unwrap_or(false) }
+fn re_match(matcher: &RegexMatcher, rel: &str) -> Result<bool, RgApiError> { matcher.is_match(rel.as_bytes()).map_err(|e| RgApiError::new(e.to_string())) }
 
 #[cfg(test)]
 mod tests {

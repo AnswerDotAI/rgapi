@@ -6,7 +6,7 @@ rgapi's in-process search. Import and fixture creation time are outside the time
 sections.
 """
 
-import shutil, subprocess, tempfile, timeit
+import argparse, shutil, subprocess, tempfile, timeit
 from pathlib import Path
 
 from rgapi import rg as rgapi_rg
@@ -48,49 +48,48 @@ def make_tiny_dir(root):
     return d
 
 
-def rg_cli(root):
-    cmd = ["rg", "--color", "never", "--no-heading", "--line-number", PATTERN, str(root)]
+def rg_cli(root, pattern):
+    cmd = ["rg", "--color", "never", "--no-heading", "--line-number", pattern, str(root)]
     return subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True).stdout
 
 
-def rgapi(root): return rgapi_rg(PATTERN, str(root))
+def rgapi(root, pattern): return rgapi_rg(pattern, str(root))
 
 
-def bench_one(name, func, root, number=1):
-    timer = timeit.Timer(lambda: func(root))
+def bench_one(name, func, root, pattern, number=1):
+    timer = timeit.Timer(lambda: func(root, pattern))
     times = timer.repeat(repeat=REPEATS, number=number)
     best = min(times) / number
     avg = sum(times) / len(times) / number
     print(f"{name:24} best {best * 1000:8.2f} ms   avg {avg * 1000:8.2f} ms")
 
 
-def bench(root):
+def bench(root, pattern):
     large = make_large_dir(root)
     many_small = make_many_small_dir(root)
     tiny = make_tiny_dir(root)
 
     # Warm imports, dynamic libraries, and disk caches before timing.
-    rgapi(large)
-    rg_cli(large)
+    rgapi(large, pattern)
+    rg_cli(large, pattern)
 
     print(f"fixture: {root}")
+    print(f"pattern: {pattern}")
     print(f"large files: {LARGE_FILES} x {LARGE_FILE_BYTES:,} bytes")
     print(f"many small files: {SMALL_FILES} x {SMALL_FILE_BYTES:,} bytes")
     print(f"repeats: {REPEATS}\n")
 
-    bench_one("rg large", rg_cli, large)
-    bench_one("rgapi large", rgapi, large)
-    print()
-    bench_one("rg many-small", rg_cli, many_small)
-    bench_one("rgapi many-small", rgapi, many_small)
-    print()
-    bench_one("rg tiny x30", rg_cli, tiny, number=SMALL_REPEATS_PER_TIMING)
-    bench_one("rgapi tiny x30", rgapi, tiny, number=SMALL_REPEATS_PER_TIMING)
+    for label, fixture, number in [("large", large, 1), ("many-small", many_small, 1), ("tiny x30", tiny, SMALL_REPEATS_PER_TIMING)]:
+        for name, func in [("rg", rg_cli), ("rgapi", rgapi)]: bench_one(f"{name} {label}", func, fixture, pattern, number)
+        print()
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pattern", default=PATTERN, help="Regex to search; fixtures contain 'needle_rgapi_bench only here'")
+    args = parser.parse_args()
     if shutil.which("rg") is None: raise SystemExit("rg executable not found")
-    with tempfile.TemporaryDirectory(prefix="rgapi-bench-") as d: bench(Path(d))
+    with tempfile.TemporaryDirectory(prefix="rgapi-bench-") as d: bench(Path(d), args.pattern)
 
 
 if __name__ == "__main__": main()

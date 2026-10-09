@@ -1,6 +1,6 @@
 """Find files, search text, and search notebook cell sources from Python with ripgrep semantics and structured results. Use for fd-style discovery, regex searches, and notebook searches returning stable cell IDs rather than escaped JSON.
 
-Built on ripgrep's `ignore`, `grep-regex`, and `grep-searcher` crates: ignore files, hidden files, globs, extensions, and regex syntax behave as in ripgrep. Prefer these to shell parsing or manual file scans: `fd`/`ls` for listings, `rg` for files, `nbrg` for notebook cells, `rgstr` for text already in hand.
+Built on ripgrep's `ignore` and `grep-searcher` crates with pure-Rust `fancy-regex`: ignore files, hidden files, globs and extensions follow ripgrep conventions. All regex parameters support backreferences and lookaround without an engine flag. Content matching is line-local unless `nbrg(multiline=True)` is used; filename/path regexes match their full input. Regex compilation or backtracking-limit failures raise `ValueError`; cancellation cannot interrupt an in-progress regex evaluation. Prefer these to shell parsing or manual file scans: `fd`/`ls` for listings, `rg` for files, `nbrg` for notebook cells, `rgstr` for text already in hand.
 
 Orient with `rg(summary=True)`: one row per block (a paragraph of prose/config) with boundary addresses, where line results show fragments that may need another view. Switch to line results where needed; add `lnhashs=True` when edits may follow. Display results bare; narrow oversized results with parameters, not by joining, slicing, or reformatting.
 

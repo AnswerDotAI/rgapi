@@ -5,12 +5,12 @@ use std::sync::{
     mpsc::SyncSender,
 };
 
-use grep_matcher::{LineTerminator, Matcher};
-use grep_regex::{RegexMatcher, RegexMatcherBuilder};
+use grep_matcher::LineTerminator;
+use crate::matcher::RegexMatcher;
 use grep_searcher::{BinaryDetection, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkError, SinkMatch};
 use ignore::{DirEntry, WalkState};
 
-use crate::RgApiError;
+use crate::{RgApiError, compile_regex};
 use crate::walk::{PathFilters, StreamIter, WalkOptions, entry_err, rel_path, resolve_roots, spawn_walk};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,7 +84,7 @@ fn search_entry(
     let Some(ft) = dent.file_type() else { return WalkState::Continue; };
     if !ft.is_file() { return WalkState::Continue; }
     let rel = rel_path(base, path);
-    if !filters.path_allowed(Path::new(&rel)) { return WalkState::Continue; }
+    match filters.path_allowed(Path::new(&rel)) { Ok(true) => {}, Ok(false) => return WalkState::Continue, Err(err) => return send_search_error(tx, err) }
     match search_path_cancelable(path, rel, matcher.clone(), before_context, after_context, Some(cancel.clone())) {
         Ok(lines) => {
             if is_cancelled(cancel) { return WalkState::Quit; }
@@ -98,27 +98,6 @@ fn search_entry(
 fn is_cancelled(cancel: &Arc<AtomicBool>) -> bool { cancel.load(Ordering::Relaxed) }
 
 fn send_search_error(tx: &SyncSender<Result<SearchLine, RgApiError>>, err: RgApiError) -> WalkState { let _ = tx.send(Err(err)); WalkState::Quit }
-
-pub fn compile_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: bool, multiline: bool) -> Result<RegexMatcher, RgApiError> {
-    if pattern.is_empty() { return Err(RgApiError::new("pattern may not be empty")); }
-    let mut builder = RegexMatcherBuilder::new();
-    builder.multi_line(true).crlf(true);
-    if multiline { builder.line_terminator(None); }
-    match case_sensitive {
-        Some(true) => {
-            builder.case_insensitive(false);
-            builder.case_smart(false);
-        }
-        Some(false) => {
-            builder.case_insensitive(true);
-            builder.case_smart(false);
-        }
-        None => {
-            builder.case_smart(smart_case);
-        }
-    }
-    builder.build(pattern).map_err(|e| RgApiError::new(e.to_string()))
-}
 
 pub(crate) fn format_lnhash(lineno: u64, line: &str) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -244,8 +223,7 @@ fn bytes_to_line(bytes: &[u8]) -> Result<String, SearchError> {
 /// Return byte offsets for every match in a line.
 pub fn spans_for(matcher: &RegexMatcher, bytes: &[u8]) -> Result<Vec<MatchSpan>, SearchError> {
     let mut spans = Vec::new();
-    matcher
-        .find_iter(bytes, |m| { spans.push(MatchSpan { start: m.start(), end: m.end() }); true })
-        .map_err(|e| SearchError::Message(e.to_string()))?;
+    let text = std::str::from_utf8(bytes).map_err(|_| SearchError::InvalidUtf8)?;
+    matcher.for_each_match(text, |start, end| spans.push(MatchSpan { start, end })).map_err(|e| SearchError::Message(e.to_string()))?;
     Ok(spans)
 }

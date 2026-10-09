@@ -290,12 +290,14 @@ def test_worker_panic_surfaces_as_error_not_truncation(tmp_path):
     with pytest.raises(Exception): _core.panic_probe(str(tmp_path), walk=True)  # walk workers
 
 
-def test_search_path_skips_binary_and_invalid_utf8(tmp_path):
+@pytest.mark.parametrize("pattern", ["TODO", r"(TO)D(?!X)O"])
+def test_search_path_skips_binary_and_invalid_utf8(tmp_path, pattern):
     (tmp_path / "bin.dat").write_bytes(b"TODO before\n\0TODO after\n")
-    (tmp_path / "bad.txt").write_bytes(b"TODO\xff\n")
-    matcher = compile("TODO")
+    matcher = compile(pattern)
     assert search_path(matcher, tmp_path / "bin.dat") == []
-    assert search_path(matcher, tmp_path / "bad.txt") == []
+    for data in [b"TODO\xff\n", b"\xffTODO\n"]:
+        (tmp_path / "bad.txt").write_bytes(data)
+        assert search_path(matcher, tmp_path / "bad.txt") == []
 
 
 def test_rg_keyboard_interrupt_cancels(tmp_path):
@@ -345,6 +347,56 @@ def test_rgstr():
     assert str(res[0]) == "1-zero"
 
 
+def test_backreferences_and_lookaround(tmp_path):
+    pattern = r"\b(\w+)\s+\1\b"
+    text = "before\né é, foo foo\nfoo\nfoo\nafter\n"
+    p = tmp_path/"echo_echo.txt"
+    p.write_text(text)
+    matcher = compile(pattern)
+    assert matcher.finditer(text) == [(7, 12), (14, 21)]
+    assert [(r.line_number, r.matches) for r in search_text(matcher, text)] == [(2, [(0, 5), (7, 14)])]
+    assert [(r.line_number, r.matches) for r in search_path(matcher, p)] == [(2, [(0, 5), (7, 14)])]
+    assert rg(pattern, p, count=True) == 2
+    assert [b.source for b in rg(pattern, p, summary=True)] == [text.rstrip()]
+    assert compile(r"(?<=é )é(?=,)").finditer(text) == [(10, 12)]
+    assert compile(r"(?=.)").finditer("éλ") == [(0, 0), (2, 2)]
+    assert [r.matches for r in rgstr(r"(?=$)", "é\n")] == [[(2, 2)]]
+    assert [p.name for p in fd(tmp_path, r"^(\w+)_\1\.txt$")] == ["echo_echo.txt"]
+    assert fd(tmp_path, path_re=r"(?<=echo_)echo") == [p]
+    assert fd(tmp_path, skip_path_re=r"(?<=echo_)echo") == []
+    sub = tmp_path/"skip_skip"
+    sub.mkdir()
+    (sub/"a.txt").write_text("foo foo")
+    assert fd(tmp_path, skip_dir_re=r"^(\w+)_\1$") == [p]
+
+
+def test_line_local_regexes_and_smart_case():
+    for pattern in [r"foo\s+foo", r"foo[^x]+foo", r"(?s:foo.+foo)", r"foo(?=\s+foo)"]:
+        assert rgstr(pattern, "foo\nfoo\n") == []
+    assert [r.matches for r in rgstr(r"(?s:foo.*|bar)", "foo\nbar\n")] == [[(0, 3)], [(0, 3)]]
+    assert compile(r"\Afoo\z").finditer("foo\nfoo\n") == [(0, 3), (4, 7)]
+    empty = compile(r"\A\z")
+    for text, spans in [("foo\n", []), ("", [(0, 0)]), ("\n", [(0, 0)]), ("foo\n\n", [(4, 4)])]:
+        assert empty.finditer(text) == spans
+        assert empty.is_match(text) == bool(spans)
+    assert compile(r"(?P<UPPER>foo)\s+(?P=UPPER)", smart_case=True).is_match("FOO foo")
+    assert compile(r"foo\S", smart_case=True).is_match("FOOx")
+    assert compile("(?x)foo # UPPER comment", smart_case=True).is_match("FOO")
+    assert not compile(r"foo[A-Z]", smart_case=True).is_match("FOOX")
+    for pattern in [r"foo\nbar", r"foo\x0Dbar"]:
+        with pytest.raises(ValueError, match="multiline=True"): compile(pattern)
+
+
+def test_regex_runtime_errors(tmp_path):
+    pattern, text = r"(a|b|ab)*(?>c)", "ab"*26
+    p = tmp_path/text
+    p.mkdir()
+    (tmp_path/(text+".txt")).write_text(text)
+    for search in [lambda: compile(pattern).is_match(text), lambda: rgstr(pattern, text),
+                   lambda: fd(tmp_path, pattern), lambda: fd(tmp_path, path_re=pattern), lambda: fd(tmp_path, skip_dir_re=pattern)]:
+        with pytest.raises(ValueError, match="backtrack"): search()
+
+
 def write_nb(path, cells):
     nb = dict(cells=cells, metadata={}, nbformat=4, nbformat_minor=5)
     path.write_text(json.dumps(nb))
@@ -356,6 +408,15 @@ def _cell(cell_type, source, cid=None, outputs=None):
         c["outputs"] = outputs or []
     if cid is not None: c["id"] = cid
     return c
+
+
+def test_notebook_backreferences(tmp_path):
+    from rgapi import nbrg
+    p = tmp_path/"echo.ipynb"
+    write_nb(p, [_cell("code", "é é\nfoo\nfoo\n", cid="c1")])
+    assert nbrg(r"(\w+) \1", p)[0].matches[0].matches == [(0, 5)]
+    assert nbrg(r"(foo)\s+\1", p) == []
+    assert nbrg(r"(foo)\s+\1", p, multiline=True)[0].matches[0].matches == [(0, 7)]
 
 
 def test_nbrg_source_only_with_cells(tmp_path):

@@ -3,11 +3,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use grep_regex::RegexMatcher;
+use crate::RegexMatcher;
 use ignore::{DirEntry, WalkState};
 
 use crate::RgApiError;
-use crate::search::{RgOptions, SearchLine, compile_regex, format_lnhash, search_text};
+use crate::search::{RgOptions, SearchLine, format_lnhash, search_text};
+use crate::compile_regex;
 use crate::walk::{PathFilters, StreamIter, entry_err, rel_path, resolve_roots, spawn_walk};
 
 /// One blank-line-delimited block containing a match, or context for one.
@@ -97,7 +98,7 @@ fn block_entry(
     let Some(ft) = dent.file_type() else { return Ok(Vec::new()); };
     if !ft.is_file() { return Ok(Vec::new()); }
     let rel = rel_path(base, path);
-    if !filters.path_allowed(Path::new(&rel)) { return Ok(Vec::new()); }
+    if !filters.path_allowed(Path::new(&rel))? { return Ok(Vec::new()); }
     let bytes = match std::fs::read(path) { Ok(bytes) => bytes, Err(_) => return Ok(Vec::new()) };
     process_file(rel, &bytes, matcher, before_context, after_context)
 }

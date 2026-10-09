@@ -64,7 +64,7 @@ def search_nb(
     display_path:str|Path|None=None, # Path stored in results; defaults to `path`
     maxlen:int=MAXLEN,                # Maximum source characters per displayed cell
 ) -> NbResults:
-    "Search one `.ipynb` file's cell sources, returning matched cells."
+    "Search one `.ipynb` file's cell sources with line-local backreferences and lookaround, returning matched cells."
     disp = _display_path(path if display_path is None else display_path)
     rows = _core.nb_search_file(pattern, _fs_path(path), disp, case_sensitive=case_sensitive,
         smart_case=smart_case, cell_context=cell_context, multiline=False)
@@ -100,7 +100,9 @@ def nbrg(
 ):
     """Search `.ipynb` cell sources under `root` in parallel, returning matched cells, paths, or a count.
 
-    Only cell sources are searched, never metadata or outputs. With `multiline=True`, `^` and `$` still anchor lines within a cell.
+    Only cell sources are searched, never metadata or outputs. Backreferences and lookaround are line-local by default.
+    `multiline=True` allows matching across lines within a cell, never across cells; `^` and `$` still anchor individual lines.
+    Compilation or backtracking-limit failures raise `ValueError`; timeouts cannot interrupt an in-progress regex evaluation.
     A match preview starts at the first matched line and marks omitted earlier lines as `…[Ln]` (1-based), but keeps a leading
     directive, as in `#| export…[L4]needle here`."""
     assert not (count and max_results), "count and max_results are mutually exclusive"

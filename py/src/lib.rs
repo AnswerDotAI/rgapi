@@ -179,7 +179,7 @@ struct RegexPy {
     case_sensitive: Option<bool>,
     #[pyo3(get)]
     smart_case: bool,
-    matcher: grep_regex::RegexMatcher,
+    matcher: rgapi::RegexMatcher,
 }
 #[pymethods]
 impl RegexPy {

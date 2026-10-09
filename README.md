@@ -2,7 +2,7 @@
 
 `rgapi` provides `fd`-style file discovery and `rg`-style text search from Python without starting a shell command.
 
-It uses the same `ignore`, `grep-regex`, and `grep-searcher` crates that ripgrep uses for walking, regex matching, and file scanning. Walking and searching run in parallel by default. Most expensive work stays in Rust.
+It uses ripgrep's `ignore` and `grep-searcher` crates for walking and file scanning, with the pure-Rust `fancy-regex` engine for regex matching. Walking and searching run in parallel by default. Most expensive work stays in Rust.
 
 ## Overview
 
@@ -87,6 +87,16 @@ Set `min_depth` and `max_depth` to bound recursion. `max_filesize` skips files a
 
 Search is case-sensitive by default, matching `rg`. Use `smart_case=True` for `rg --smart-case` behaviour. Use `case_sensitive=False` to force case-insensitive matching.
 
+Patterns support backreferences and lookaround everywhere, including filename and path filters:
+
+```python
+rg(r"\b(\w+)\s+\1\b", ".")  # repeated words
+rg(r"(?<=TODO: )\w+", ".")   # word following TODO:
+fd(".", pattern=r"^(\w+)_\1\.py$")  # names such as utils_utils.py
+```
+
+All regex parameters use `fancy-regex`; no engine-selection flag or C library is required. Ordinary patterns use its non-backtracking engine. Patterns requiring backtracking have a bounded backtracking budget; exceeding it raises `ValueError`, rather than silently skipping a file or path.
+
 Each `SearchLine` has these fields:
 
 ```text
@@ -106,7 +116,9 @@ Pass `lnhashs=True` to `rg` or `rg_iter` to display hash addresses instead of li
 
 For other result forms, use `rg(..., paths=True)` to return unique matched paths or `rg(..., count=True)` to count match spans. `paths` and `count` cannot both be set.
 
-`^` and `$` match at the start and end of each line. A line ends at `\n` or `\r\n`. `$` also matches before a `\r` that has no `\n` after it. `rg`, `rgstr`, and `nbrg` without `multiline=True` raise `ValueError` for a pattern that contains a literal `\n` or `\r`.
+`^` and `$` match at the start and end of each line. A line ends at `\n` or `\r\n`. `$` also matches before a `\r` that has no `\n` after it. `rg`, `rgstr`, and `compile` reject patterns containing a literal `\n` or `\r`. `nbrg` allows them with `multiline=True`.
+
+Content searches and compiled content matchers are confined to individual lines: whitespace classes, backreferences and lookaround cannot cross a line ending, and `\A`/`\z` refer to each line. With `nbrg(..., multiline=True)`, `\A`/`\z` refer to the whole cell, while `^`/`$` still anchor lines. Filename and path filters match the full name or path instead.
 
 ### Path results
 
@@ -137,6 +149,8 @@ Set `timeout_ms` on `rg`, `fd`, `walk`, or `ls` to stop at a deadline and return
 - `stop_reason="timeout"` means the deadline was reached.
 
 `complete` is true exactly when `stop_reason` is `None`. `count=True` returns a plain integer without a completion flag. It cannot be combined with `timeout_ms`.
+
+Deadlines stop result collection and request worker cancellation. Workers cannot interrupt a regex evaluation or filesystem call already in progress; a timeout is not a hard per-match execution limit.
 
 ### Context lines
 
@@ -169,7 +183,9 @@ nbrg("read_csv", ".")                  # cells whose source matches, across all 
 nbrg("read_csv", ".", cell_context=1)  # also include neighbouring cells as context
 ```
 
-Notebook discovery, parsing, and matching run together in one parallel Rust pass. Matching uses `rg`'s regex engine with the same `case_sensitive` and `smart_case` behaviour. `nbrg` accepts the discovery filters from `fd` and `rg`, including `include`, `exclude`, `glob`, `hidden`, `max_depth`, and `skip_dir`.
+Notebook discovery, parsing, and matching run together in one parallel Rust pass. Matching uses the same `fancy-regex` engine as `rgapi.rg`, including backreferences and lookaround, with the same `case_sensitive` and `smart_case` behaviour. `nbrg` accepts the discovery filters from `fd` and `rg`, including `include`, `exclude`, `glob`, `hidden`, `max_depth`, and `skip_dir`.
+
+Matching is line-oriented by default. Use `nbrg(r"(foo)\n\1", ".", multiline=True)` to match across lines within a cell. Matches never cross cell boundaries.
 
 `nbrg` returns `NbResults`, a list of `NbCell`. Each `NbCell` has:
 
@@ -227,7 +243,7 @@ async for row in rga_iter("TODO", "."): ...
 
 Walking and searching use Rust threads, without `asyncio.to_thread` or the event loop's executor. A callback uses `loop.call_soon_threadsafe` to complete the awaited future or supply results to the generator's queue. The event loop remains unblocked, with normal `contextvars` behaviour.
 
-Cancellation stops the Rust workers within about one row. This includes timeouts from `asyncio.wait_for` or `asyncio.timeout`. It also includes task cancellation, such as starlette cancelling a disconnected client's request.
+Cancellation is checked between rows and files; it does not interrupt a regex evaluation or filesystem call already in progress. This includes timeouts from `asyncio.wait_for` or `asyncio.timeout`. It also includes task cancellation, such as starlette cancelling a disconnected client's request.
 
 Wrap an async iterator in `contextlib.aclosing` when leaving its loop early. `break` alone delays generator finalization until garbage collection. The context manager provides prompt cleanup:
 

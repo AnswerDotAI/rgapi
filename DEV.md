@@ -5,8 +5,9 @@
 ## Layout
 
 ```text
-src/walk.rs       ignore/globset/grep-regex-backed path walking and filtering
-src/search.rs     grep-regex/grep-searcher-backed searching
+src/matcher.rs    shared fancy-regex engine, smart-case policy, and grep-matcher adapter
+src/walk.rs       ignore/globset-backed path walking and filtering
+src/search.rs     grep-searcher-backed searching
 src/block.rs      blank-line-delimited block grouping, matching, and block context
 py/src/lib.rs     PyO3 classes and private core functions
 python/rgapi/     public Python wrappers over `rgapi._core`, plus the `rgapi-nbrg` CLI
@@ -37,6 +38,10 @@ Release flow is: release first, then bump - `ship-release` does both.
 The GitHub workflow builds wheels for Python 3.10-3.13 on Linux and macOS and publishes the Rust crate, GitHub release artifacts, and PyPI package when a `v*` tag is pushed.
 
 ## Design notes
+
+All user-supplied regexes use the shared `RegexMatcher` in `src/matcher.rs`, backed by `fancy-regex`. There is no separate fallback engine or native C dependency. The adapter implements `grep_matcher::Matcher` so `grep-searcher` continues to handle file scanning, line numbers, context, and binary detection. `compile_regex` returns rgapi's own exported `RegexMatcher` type.
+
+The matcher centralizes smart-case analysis and line-ending policy. Line-safe patterns can search a whole buffer; patterns that can consume line endings or inspect neighbouring lines are evaluated on individual lines. Notebook multiline matching instead uses the whole cell. Filename/path regexes match their whole input. Backtracking-limit errors propagate through the existing result channels, including directory-pruning errors; cancellation must not hide a queued error from async consumers.
 
 Python discovery and `paths=True` results contain absolute `pathlib.Path` objects. Structured search rows hold base-relative string labels with `/` separators. Traversal uses `ignore::WalkParallel`, so result order is not part of the API contract. Search results are structured rows; collected result lists use rg-style `str()` and notebook display. `SearchLine.lnhash` is computed with the same CRC-32-based line-content hash format as exhash (`lineno|hash|`, low 12 bits of CRC-32 over the line's UTF-8 bytes, encoded as two Base64url characters); `lnhashs=True` only changes row display, not `line_number` or matching behavior. Path regexes filter returned/searched paths; `skip_dir` and `skip_dir_re` prune traversal through `ignore::WalkBuilder::filter_entry`. Depth, size, filesystem, hidden, and ignore options use `ignore::WalkBuilder` settings. The `ignore` walker follows every root it is given. Discovery checks each root with `symlink_metadata`. The worker sends each unfollowed link root as a result before walking the other roots. This also supports dangling roots, which the underlying walker would reject. `ls` sets `walk_root_links`, which gives a root link to a directory to the walker. The walker then reports paths under the link. Other discovery roots use absolute paths without canonicalizing. Content searches retain canonical root resolution. `rg_iter` exposes the same parallel search stream that `rg` collects by default; `paths=True` and `count=True` consume that stream with different reducers. Text search skips binary files and invalid UTF-8 content.
 

@@ -17,7 +17,10 @@ def compile(
     case_sensitive:bool|None=None, # True/False forces case; None allows `smart_case`
     smart_case:bool=False # Match `rg --smart-case` behavior
 ) -> Regex:
-    "Compile a regex matcher for `search_text`, `search_path`, and direct matching."
+    """Compile a line-oriented fancy-regex matcher, supporting backreferences and lookaround.
+
+    `is_match` and `finditer` search each line independently; match offsets are UTF-8 bytes.
+    Compilation or backtracking-limit failures raise `ValueError`."""
     return _core.compile(pattern, case_sensitive=case_sensitive, smart_case=smart_case)
 
 class _Results(list):
@@ -159,7 +162,9 @@ def fd(
     timeout_ms:int|None=None, # Cancel the walk after this long and return partial results
     **kwargs
 ) -> PathResults:
-    "Find absolute Paths with fd-style filters and gitignore support."
+    """Find absolute Paths with fd-style filters and gitignore support.
+
+    Filename/path regexes support backreferences and lookaround, matching the full name/path. Regex errors raise `ValueError`."""
     return _find(root, pattern, files, dirs, timeout_ms, show_target, **kwargs)
 
 
@@ -305,6 +310,9 @@ def rg(
     **kwargs
 ):
     """Search files and return `SearchResults`, matched paths, or a count; `lnhashs=True` shows exhash-style addresses.
+
+    Patterns support backreferences and lookaround, confined to individual lines. Compilation or backtracking-limit failures
+    raise `ValueError`. Timeouts request cancellation but do not interrupt a regex evaluation already in progress.
 
     `summary=True` returns one `SearchBlock` per block of lines separated by blank or whitespace-only lines, however many matches
     it holds, and `context` then counts blocks. Summary mode can't combine with `paths` or `count`, and with `lnhashs=True` shows

@@ -3,21 +3,22 @@ use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock};
 
-use grep_matcher::{Captures, Matcher};
-use grep_regex::RegexMatcher;
+use fancy_regex::Regex;
+use crate::RegexMatcher;
 use ignore::{DirEntry, WalkState};
 use serde::Deserialize;
 
 use crate::RgApiError;
-use crate::search::{SearchLine, compile_regex, search_text};
+use crate::search::{SearchLine, search_text};
+use crate::compile_regex;
 use crate::walk::{PathFilters, StreamIter, WalkOptions, entry_err, rel_path, resolve_roots, spawn_walk};
 
-static HEADING_RE: LazyLock<RegexMatcher> = LazyLock::new(|| RegexMatcher::new(r"^#{1,6} \w").unwrap());
+static HEADING_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#{1,6} \w").unwrap());
 
 /// Heading level of the first nonblank line after skipping `#|` directives; zero unless it matches `^#{1,6} \w`.
 pub fn heading_level(source: &str) -> usize {
     let line = source.lines().find(|l| !l.trim().is_empty() && !l.starts_with("#|")).unwrap_or("");
-    if !HEADING_RE.is_match(line.as_bytes()).unwrap_or(false) { return 0; }
+    if !HEADING_RE.is_match(line).unwrap_or(false) { return 0; }
     line.bytes().take_while(|&b| b == b'#').count()
 }
 
@@ -44,12 +45,8 @@ pub fn ancestor_indices(levels: &[usize], idx: usize) -> Vec<usize> {
 
 /// Group 1 of every `` sigil`body` `` match in `text`, in order of appearance. `sigil` and `body` are regex fragments.
 fn sigil_caps(text: &str, sigil: &str, body: &str) -> Vec<String> {
-    let re = RegexMatcher::new(&format!("{sigil}`({body})`")).expect("sigil pattern compiles");
-    let mut caps = re.new_captures().expect("captures allocate");
-    let mut res = Vec::new();
-    re.captures_iter(text.as_bytes(), &mut caps, |c| { if let Some(m) = c.get(1) { res.push(text[m.start()..m.end()].to_string()); } true })
-    .expect("regex search is infallible");
-    res
+    let re = Regex::new(&format!("{sigil}`({body})`")).expect("sigil pattern compiles");
+    re.captures_iter(text).map(|c| c.expect("internal regex search succeeds").get(1).unwrap().as_str().to_string()).collect()
 }
 
 /// Names written as `` &`name` `` or `` &`[a, b]` `` in `text`. A name holds word characters and dots.
@@ -175,14 +172,6 @@ fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, cell_context
     Ok(out)
 }
 
-fn compile_nb_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: bool, multiline: bool) -> Result<RegexMatcher, RgApiError> {
-    compile_regex(pattern, case_sensitive, smart_case, multiline).map_err(|e| {
-        if !multiline && e.to_string().contains("not allowed in a regex") {
-            RgApiError::new(format!("{e}; pass multiline=True to let the pattern match across lines within a cell"))
-        } else { e }
-    })
-}
-
 pub fn nb_search_file(
     path: &Path,
     display_path: String,
@@ -192,7 +181,7 @@ pub fn nb_search_file(
     cell_context: usize,
     multiline: bool,
 ) -> Result<Vec<NbCell>, RgApiError> {
-    let matcher = compile_nb_regex(pattern, case_sensitive, smart_case, multiline)?;
+    let matcher = compile_regex(pattern, case_sensitive, smart_case, multiline)?;
     let bytes = match std::fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
     process_file(display_path, &bytes, &matcher, cell_context, multiline)
 }
@@ -211,7 +200,7 @@ fn nb_entry(
     let Some(ft) = dent.file_type() else { return Ok(Vec::new()); };
     if !ft.is_file() { return Ok(Vec::new()); }
     let rel = rel_path(base, path);
-    if !filters.path_allowed(Path::new(&rel)) { return Ok(Vec::new()); }
+    if !filters.path_allowed(Path::new(&rel))? { return Ok(Vec::new()); }
     let bytes = match std::fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
     process_file(rel, &bytes, matcher, cell_context, multiline)
 }
@@ -221,7 +210,7 @@ pub type NbIter = StreamIter<NbCell>;
 pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
     let (roots, base) = resolve_roots(&opts.walk, true, false)?;
     let filters = Arc::new(PathFilters::new(&opts.walk)?);
-    let matcher = compile_nb_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, opts.multiline)?;
+    let matcher = compile_regex(&opts.pattern, opts.case_sensitive, opts.smart_case, opts.multiline)?;
     let (cell_context, multiline, max_depth) = (opts.cell_context, opts.multiline, opts.walk.max_depth);
     Ok(spawn_walk(roots, base, &opts.walk, filters, Vec::new(), move |dent, base, filters, tx, cancel| {
         match nb_entry(dent, base, filters, &matcher, cell_context, multiline, max_depth) {

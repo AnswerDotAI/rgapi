@@ -72,6 +72,16 @@ def test_fda_iter(tmp_path):
     assert run_sync(first_then_close()) in fd(tmp_path)
 
 
+def test_async_pruning_regex_errors(tmp_path):
+    sub = tmp_path/("ab"*26)
+    sub.mkdir()
+    (sub/"a.txt").write_text("TODO")
+    pattern = r"(a|b|ab)*(?>c)"
+    with pytest.raises(ValueError, match="backtrack"): run_sync(fda(tmp_path, skip_dir_re=pattern))
+    async def rows(): return [r async for r in rga_iter("TODO", tmp_path, skip_dir_re=pattern)]
+    with pytest.raises(ValueError, match="backtrack"): run_sync(rows())
+
+
 def test_nbrga_paths(tmp_path):
     from rgapi import nbrg, nbrga
     from test_rgapi import _cell, write_nb

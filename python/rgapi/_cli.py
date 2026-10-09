@@ -22,7 +22,7 @@ def nbrg_cli(
     max_depth:int=None, # Maximum directory depth to search
     timeout_ms:int=None, # Stop searching after this many milliseconds
 ):
-    "Search notebook cell sources and report stable cell IDs."
+    "Search notebook cell sources with backreferences/lookaround and report stable cell IDs."
     print(nbrg(pattern, roots or '.', cell_context=cell_context, multiline=multiline, smart_case=smart_case,
         case_sensitive=True if case else None, paths=paths, count=count, max_results=max_results, maxlen=maxlen,
         glob=glob, exclude=exclude, hidden=hidden, max_depth=max_depth, timeout_ms=timeout_ms))
