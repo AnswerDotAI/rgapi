@@ -14,4 +14,4 @@ grep-matcher.workspace = true
 pyo3 = { version = ">=0.29", features = ["extension-module"] }
 
 [build-dependencies]
-pyo3-build-config = "0.29"
+pyo3-build-config = ">=0.29"
