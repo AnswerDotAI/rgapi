@@ -23,7 +23,7 @@ cargo develop
 pytest -q
 ```
 
-`cargo develop` and bare `cargo test` use the same Cargo profile and share the core and binding libraries. Unit tests also build a separate `cfg(test)` executable. The published `rgapi` crate has no Python dependency; the unpublished `rgapi-py` crate in `py/` builds the extension. Run `cargo fmt` after Rust edits and `chkstyle` before committing Python edits.
+`cargo develop` and bare `cargo test` use the same Cargo profile and share the core and binding libraries. Unit tests also build a separate `cfg(test)` executable. The published `rgapi` crate has no Python dependency; the unpublished `rgapi-py` crate in `py/` builds the extension. Run `cargo fastfmt` after Rust edits and `chkstyle` before committing Python edits.
 
 ## Release
 

@@ -24,7 +24,9 @@ impl RegexMatcher {
             analysis.expression(expr)?;
             stack.extend(expr.children_iter());
         }
-        if line_oriented && analysis.literal_newline { return Err(RgApiError::new("a literal newline or carriage return is not allowed in a regex without multiline=True")); }
+        if line_oriented && analysis.literal_newline {
+            return Err(RgApiError::new("a literal newline or carriage return is not allowed in a regex without multiline=True"));
+        }
         let insensitive = case_sensitive.map_or(smart_case && analysis.literal && !analysis.uppercase, |s| !s);
         let regex = RegexBuilder::new(pattern).multi_line(line_anchors).crlf(line_anchors).case_insensitive(insensitive).build().map_err(regex_error)?;
         Ok(Self { regex, line_oriented, whole_buffer: !line_oriented || !analysis.line_local })
@@ -32,7 +34,10 @@ impl RegexMatcher {
 
     pub(crate) fn for_each_match(&self, text: &str, mut matched: impl FnMut(usize, usize)) -> Result<(), fancy_regex::Error> {
         let mut scan = |part: &str, offset| {
-            for m in self.regex.find_iter(part) { let m = m?; matched(offset + m.start(), offset + m.end()); }
+            for m in self.regex.find_iter(part) {
+                let m = m?;
+                matched(offset + m.start(), offset + m.end());
+            }
             Ok(())
         };
         if self.whole_buffer { return scan(text, 0); }
@@ -90,7 +95,10 @@ impl Matcher for RegexMatcher {
 struct Analysis { literal: bool, uppercase: bool, literal_newline: bool, line_local: bool }
 
 impl Analysis {
-    fn literal(&mut self, c: char) { self.literal = true; self.uppercase |= c.is_uppercase(); }
+    fn literal(&mut self, c: char) {
+        self.literal = true;
+        self.uppercase |= c.is_uppercase();
+    }
 
     fn expression(&mut self, expr: &Expr) -> Result<(), RgApiError> {
         match expr {
@@ -129,14 +137,26 @@ fn contains_newline(hir: &Hir) -> bool {
 
 #[derive(Default)]
 struct ClassLiterals { literal: bool, uppercase: bool }
-impl ClassLiterals { fn add(&mut self, c: char) { self.literal = true; self.uppercase |= c.is_uppercase(); } }
+impl ClassLiterals {
+    fn add(&mut self, c: char) {
+        self.literal = true;
+        self.uppercase |= c.is_uppercase();
+    }
+}
 impl Visitor for ClassLiterals {
     type Output = Self;
     type Err = std::convert::Infallible;
     fn finish(self) -> Result<Self, Self::Err> { Ok(self) }
     fn visit_pre(&mut self, ast: &Ast) -> Result<(), Self::Err> { if let Ast::Literal(lit) = ast { self.add(lit.c); } Ok(()) }
     fn visit_class_set_item_pre(&mut self, item: &ast::ClassSetItem) -> Result<(), Self::Err> {
-        match item { ast::ClassSetItem::Literal(lit) => self.add(lit.c), ast::ClassSetItem::Range(r) => { self.add(r.start.c); self.add(r.end.c); } _ => {} }
+        match item {
+            ast::ClassSetItem::Literal(lit) => self.add(lit.c),
+            ast::ClassSetItem::Range(r) => {
+                self.add(r.start.c);
+                self.add(r.end.c);
+            }
+            _ => {}
+        }
         Ok(())
     }
 }

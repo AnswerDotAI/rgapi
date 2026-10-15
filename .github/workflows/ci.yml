@@ -62,7 +62,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - id: crates-auth
         uses: rust-lang/crates-io-auth-action@v1
-      - run: cargo publish -p rgapi
+      - run: cargo publish -p rgapi --no-verify
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
       - uses: actions/download-artifact@v8

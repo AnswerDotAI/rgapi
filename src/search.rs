@@ -1,50 +1,29 @@
 use std::path::Path;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-    mpsc::SyncSender,
-};
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc::SyncSender};
 
-use grep_matcher::LineTerminator;
 use crate::matcher::RegexMatcher;
+use grep_matcher::LineTerminator;
 use grep_searcher::{BinaryDetection, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkError, SinkMatch};
 use ignore::{DirEntry, WalkState};
 
-use crate::{RgApiError, compile_regex};
 use crate::walk::{PathFilters, StreamIter, WalkOptions, entry_err, rel_path, resolve_roots, spawn_walk};
+use crate::{RgApiError, compile_regex};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchSpan { pub start: usize, pub end: usize }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SearchKind {
-    Match,
-    Before,
-    After,
-    Context,
-}
+pub enum SearchKind { Match, Before, After, Context }
 impl SearchKind {
     pub fn as_str(self) -> &'static str { match self { Self::Match => "match", Self::Before => "before", Self::After => "after", Self::Context => "context" } }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SearchLine {
-    pub kind: SearchKind,
-    pub path: String,
-    pub line_number: u64,
-    pub lnhash: String,
-    pub line: String,
-    pub matches: Vec<MatchSpan>,
-}
+pub struct SearchLine { pub kind: SearchKind, pub path: String, pub line_number: u64, pub lnhash: String, pub line: String, pub matches: Vec<MatchSpan> }
 
 #[derive(Debug, Clone, Default)]
 pub struct RgOptions {
-    pub walk: WalkOptions,
-    pub pattern: String,
-    pub case_sensitive: Option<bool>,
-    pub smart_case: bool,
-    pub before_context: usize,
-    pub after_context: usize,
-    pub panic_probe: bool,
+    pub walk: WalkOptions, pub pattern: String, pub case_sensitive: Option<bool>, pub smart_case: bool, pub before_context: usize, pub after_context: usize,
+    pub panic_probe: bool
 }
 
 pub fn rg(opts: &RgOptions) -> Result<Vec<SearchLine>, RgApiError> { rg_iter(opts)?.collect() }
@@ -63,28 +42,17 @@ pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
 pub type RgIter = StreamIter<SearchLine>;
 
 fn search_entry(
-    entry: Result<DirEntry, ignore::Error>,
-    base: &Path,
-    filters: &PathFilters,
-    matcher: &RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-    max_depth: Option<usize>,
-    tx: &SyncSender<Result<SearchLine, RgApiError>>,
-    cancel: &Arc<AtomicBool>,
-) -> WalkState {
+    entry: Result<DirEntry, ignore::Error>, base: &Path, filters: &PathFilters, matcher: &RegexMatcher, before_context: usize, after_context: usize,
+    max_depth: Option<usize>, tx: &SyncSender<Result<SearchLine, RgApiError>>, cancel: &Arc<AtomicBool>) -> WalkState {
     if is_cancelled(cancel) { return WalkState::Quit; }
     let dent = match entry {
-        Ok(dent) => dent,
-        Err(err) => {
-            return match entry_err(err, max_depth) { Some(e) => send_search_error(tx, e), None => WalkState::Continue };
-        }
+        Ok(dent) => dent, Err(err) => { return match entry_err(err, max_depth) { Some(e) => send_search_error(tx, e), None => WalkState::Continue }; }
     };
     let path = dent.path();
     let Some(ft) = dent.file_type() else { return WalkState::Continue; };
     if !ft.is_file() { return WalkState::Continue; }
     let rel = rel_path(base, path);
-    match filters.path_allowed(Path::new(&rel)) { Ok(true) => {}, Ok(false) => return WalkState::Continue, Err(err) => return send_search_error(tx, err) }
+    match filters.path_allowed(Path::new(&rel)) { Ok(true) => {} Ok(false) => return WalkState::Continue, Err(err) => return send_search_error(tx, err) }
     match search_path_cancelable(path, rel, matcher.clone(), before_context, after_context, Some(cancel.clone())) {
         Ok(lines) => {
             if is_cancelled(cancel) { return WalkState::Quit; }
@@ -106,53 +74,29 @@ pub(crate) fn format_lnhash(lineno: u64, line: &str) -> String {
 }
 
 pub fn search_path(
-    path: &Path,
-    display_path: String,
-    matcher: RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-) -> Result<Vec<SearchLine>, RgApiError> { search_path_cancelable(path, display_path, matcher, before_context, after_context, None) }
+    path: &Path, display_path: String, matcher: RegexMatcher, before_context: usize, after_context: usize) -> Result<Vec<SearchLine>, RgApiError> {
+    search_path_cancelable(path, display_path, matcher, before_context, after_context, None)
+}
 
 fn search_path_cancelable(
-    path: &Path,
-    display_path: String,
-    matcher: RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-    cancel: Option<Arc<AtomicBool>>,
+    path: &Path, display_path: String, matcher: RegexMatcher, before_context: usize, after_context: usize, cancel: Option<Arc<AtomicBool>>
 ) -> Result<Vec<SearchLine>, RgApiError> {
     let mut builder = SearcherBuilder::new();
-    builder
-        .line_number(true)
-        .line_terminator(LineTerminator::crlf())
-        .before_context(before_context)
-        .after_context(after_context)
+    builder.line_number(true).line_terminator(LineTerminator::crlf()).before_context(before_context).after_context(after_context)
         .binary_detection(BinaryDetection::quit(0));
     let mut searcher = builder.build();
     let mut out = Vec::new();
     let search_matcher = matcher.clone();
     let sink = CollectSink { path: display_path, matcher, lines: &mut out, cancel };
     match searcher.search_path(search_matcher, path, sink) {
-        Ok(()) => Ok(out),
-        Err(SearchError::InvalidUtf8) => Ok(Vec::new()),
-        Err(err) => Err(RgApiError::new(err.to_string())),
+        Ok(()) => Ok(out), Err(SearchError::InvalidUtf8) => Ok(Vec::new()), Err(err) => Err(RgApiError::new(err.to_string()))
     }
 }
 pub fn search_text(
-    display_path: String,
-    text: &str,
-    matcher: RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-    multiline: bool,
+    display_path: String, text: &str, matcher: RegexMatcher, before_context: usize, after_context: usize, multiline: bool
 ) -> Result<Vec<SearchLine>, RgApiError> { search_bytes(display_path, text.as_bytes(), matcher, before_context, after_context, multiline) }
 fn search_bytes(
-    display_path: String,
-    bytes: &[u8],
-    matcher: RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-    multiline: bool,
+    display_path: String, bytes: &[u8], matcher: RegexMatcher, before_context: usize, after_context: usize, multiline: bool
 ) -> Result<Vec<SearchLine>, RgApiError> {
     let mut builder = SearcherBuilder::new();
     builder.line_number(true).line_terminator(LineTerminator::crlf()).before_context(before_context).after_context(after_context).multi_line(multiline);
@@ -164,12 +108,7 @@ fn search_bytes(
     Ok(out)
 }
 
-struct CollectSink<'a> {
-    path: String,
-    matcher: RegexMatcher,
-    lines: &'a mut Vec<SearchLine>,
-    cancel: Option<Arc<AtomicBool>>,
-}
+struct CollectSink<'a> { path: String, matcher: RegexMatcher, lines: &'a mut Vec<SearchLine>, cancel: Option<Arc<AtomicBool>> }
 impl CollectSink<'_> { fn cancelled(&self) -> bool { match &self.cancel { Some(cancel) => is_cancelled(cancel), None => false } } }
 
 impl Sink for CollectSink<'_> {
@@ -180,23 +119,15 @@ impl Sink for CollectSink<'_> {
         let line = bytes_to_line(mat.bytes())?;
         let line_number = mat.line_number().unwrap_or(0);
         let spans = spans_for(&self.matcher, mat.bytes())?;
-        self.lines.push(SearchLine {
-            kind: SearchKind::Match,
-            path: self.path.clone(),
-            line_number,
-            lnhash: format_lnhash(line_number, &line),
-            line,
-            matches: spans,
-        });
+        self.lines.push(SearchLine { kind: SearchKind::Match, path: self.path.clone(), line_number, lnhash: format_lnhash(line_number, &line), line,
+            matches: spans });
         Ok(!self.cancelled())
     }
 
     fn context(&mut self, _searcher: &grep_searcher::Searcher, ctx: &SinkContext<'_>) -> Result<bool, Self::Error> {
         if self.cancelled() { return Ok(false); }
         let kind = match ctx.kind() {
-            SinkContextKind::Before => SearchKind::Before,
-            SinkContextKind::After => SearchKind::After,
-            SinkContextKind::Other => SearchKind::Context,
+            SinkContextKind::Before => SearchKind::Before, SinkContextKind::After => SearchKind::After, SinkContextKind::Other => SearchKind::Context
         };
         let line = bytes_to_line(ctx.bytes())?;
         let line_number = ctx.line_number().unwrap_or(0);

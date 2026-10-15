@@ -35,23 +35,9 @@ pub struct WalkOptions {
 
 impl Default for WalkOptions {
     fn default() -> Self {
-        Self {
-            roots: vec![PathBuf::from(".")],
-            includes: Vec::new(),
-            excludes: Vec::new(),
-            exts: Vec::new(),
-            path_re: None,
-            skip_path_re: None,
-            skip_dirs: Vec::new(),
-            skip_dir_re: None,
-            hidden: false,
-            ignore: true,
-            max_depth: None,
-            min_depth: None,
-            max_filesize: None,
-            follow_links: false,
-            same_file_system: false,
-        }
+        Self { roots: vec![PathBuf::from(".")], includes: Vec::new(), excludes: Vec::new(), exts: Vec::new(), path_re: None, skip_path_re: None,
+            skip_dirs: Vec::new(), skip_dir_re: None, hidden: false, ignore: true, max_depth: None, min_depth: None, max_filesize: None, follow_links: false,
+            same_file_system: false }
     }
 }
 
@@ -67,7 +53,9 @@ pub struct FindOptions {
 }
 
 impl Default for FindOptions {
-    fn default() -> Self { Self { walk: WalkOptions::default(), pattern: None, files: true, dirs: false, special_files: false, panic_probe: false } }
+    fn default() -> Self {
+        Self { walk: WalkOptions::default(), pattern: None, files: true, dirs: false, special_files: false, panic_probe: false }
+    }
 }
 
 pub fn find(opts: &FindOptions) -> Result<Vec<PathBuf>, RgApiError> { find_iter(opts)?.collect() }
@@ -87,21 +75,17 @@ pub fn find_iter_with(opts: &FindOptions, walk_root_links: bool) -> Result<FindI
     let (links, roots): (Vec<_>, Vec<_>) = roots.into_iter().partition(|r| r.is_symlink() && !walk.follow_links && !(walk_root_links && r.is_dir()));
     let mut ready = Vec::new();
     if walk.min_depth.unwrap_or(0) == 0 {
-        for link in links { let rel = relative_path(&base, &link); if find_matches(rel, &filters, pattern.as_ref())? { ready.push(rel.to_path_buf()); } }
+        for link in links {
+            let rel = relative_path(&base, &link);
+            if find_matches(rel, &filters, pattern.as_ref())? { ready.push(rel.to_path_buf()); }
+        }
     }
     let (files, dirs, special_files, panic_probe, max_depth) = (opts.files, opts.dirs, opts.special_files, opts.panic_probe, walk.max_depth);
     Ok(spawn_walk(roots, base, walk, filters, ready, move |dent, base, filters, tx, cancel| {
         if panic_probe { panic!("rgapi: deliberate panic for tests (panic_probe)"); }
         match find_entry(dent, base, filters, pattern.as_ref(), files, dirs, special_files, max_depth) {
-            Ok(Some(path)) => {
-                if cancel.load(Ordering::Relaxed) || tx.send(Ok(path)).is_err() { return WalkState::Quit; }
-                WalkState::Continue
-            }
-            Ok(None) => WalkState::Continue,
-            Err(err) => {
-                let _ = tx.send(Err(err));
-                WalkState::Quit
-            }
+            Ok(Some(path)) => { if cancel.load(Ordering::Relaxed) || tx.send(Ok(path)).is_err() { return WalkState::Quit; } WalkState::Continue }
+            Ok(None) => WalkState::Continue, Err(err) => { let _ = tx.send(Err(err)); WalkState::Quit }
         }
     }))
 }
@@ -135,10 +119,8 @@ impl<T> StreamIter<T> {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             if left.is_zero() { return Ok((res, true)); }
             match self.next_timeout(left) {
-                Ok(Ok(item)) => res.push(item),
-                Ok(Err(err)) => return Err(err),
-                Err(mpsc::RecvTimeoutError::Disconnected) => return Ok((res, false)),
-                Err(mpsc::RecvTimeoutError::Timeout) => return Ok((res, true)),
+                Ok(Ok(item)) => res.push(item), Ok(Err(err)) => return Err(err), Err(mpsc::RecvTimeoutError::Disconnected) => return Ok((res, false)),
+                Err(mpsc::RecvTimeoutError::Timeout) => return Ok((res, true))
             }
         }
     }
@@ -179,14 +161,8 @@ mod close_tests {
 }
 
 pub(crate) fn spawn_walk<T, F>(roots: Vec<PathBuf>, base: PathBuf, walk: &WalkOptions, filters: Arc<PathFilters>, ready: Vec<T>, entry: F) -> StreamIter<T>
-where
-    T: Send + 'static,
-    F: Fn(Result<DirEntry, ignore::Error>, &Path, &PathFilters, &mpsc::SyncSender<Result<T, RgApiError>>, &Arc<AtomicBool>) -> WalkState
-        + Send
-        + Sync
-        + Clone
-        + 'static,
-{
+where T: Send + 'static, F: Fn(Result<DirEntry, ignore::Error>, &Path, &PathFilters, &mpsc::SyncSender<Result<T, RgApiError>>, &Arc<AtomicBool>) -> WalkState
+        + Send + Sync + Clone + 'static {
     let cancel = Arc::new(AtomicBool::new(false));
     let worker_cancel = cancel.clone();
     let (tx, rx) = mpsc::sync_channel(8192);
@@ -203,9 +179,7 @@ where
                 let (tx, base, filters, cancel, entry, seen) = (tx.clone(), base.clone(), filters.clone(), worker_cancel.clone(), entry.clone(), seen.clone());
                 Box::new(move |dent| {
                     if cancel.load(Ordering::Relaxed) { return WalkState::Quit; }
-                    if let (Some(seen), Ok(d)) = (&seen, &dent)
-                        && !seen.lock().unwrap().insert(d.path().to_path_buf())
-                    { return WalkState::Continue; }
+                    if let (Some(seen), Ok(d)) = (&seen, &dent) && !seen.lock().unwrap().insert(d.path().to_path_buf()) { return WalkState::Continue; }
                     catch_unwind(AssertUnwindSafe(|| entry(dent, &base, &filters, &tx, &cancel))).unwrap_or_else(|_| {
                         let _ = tx.send(Err(RgApiError::new("internal error during search (this is a bug, please report it)")));
                         WalkState::Quit
@@ -218,15 +192,8 @@ where
 }
 
 fn find_entry(
-    entry: Result<DirEntry, ignore::Error>,
-    base: &Path,
-    filters: &PathFilters,
-    pattern: Option<&RegexMatcher>,
-    files: bool,
-    dirs: bool,
-    special_files: bool,
-    max_depth: Option<usize>,
-) -> Result<Option<PathBuf>, RgApiError> {
+    entry: Result<DirEntry, ignore::Error>, base: &Path, filters: &PathFilters, pattern: Option<&RegexMatcher>, files: bool, dirs: bool, special_files: bool,
+    max_depth: Option<usize>) -> Result<Option<PathBuf>, RgApiError> {
     let dent = match entry {
         Ok(dent) => dent,
         Err(err) => {
@@ -251,8 +218,7 @@ fn find_entry(
 fn dangling_link(err: &ignore::Error) -> Option<&Path> {
     match err {
         ignore::Error::WithPath { path, .. } => (path.is_symlink() && !path.exists()).then_some(path.as_path()),
-        ignore::Error::WithDepth { err, .. } => dangling_link(err),
-        _ => None,
+        ignore::Error::WithDepth { err, .. } => dangling_link(err), _ => None
     }
 }
 
@@ -320,50 +286,33 @@ fn configure_walker(walker: &mut WalkBuilder, root: &Path, walk: &WalkOptions) {
     walker.same_file_system(walk.same_file_system);
 }
 
-fn filter_dirs<T: Send + 'static>(walker: &mut WalkBuilder, base: &Path, filters: Arc<PathFilters>, tx: mpsc::SyncSender<Result<T, RgApiError>>, cancel: Arc<AtomicBool>) {
+fn filter_dirs<T: Send + 'static>(
+    walker: &mut WalkBuilder, base: &Path, filters: Arc<PathFilters>, tx: mpsc::SyncSender<Result<T, RgApiError>>, cancel: Arc<AtomicBool>) {
     let base = base.to_path_buf();
-    walker.filter_entry(move |entry| if cancel.load(Ordering::Relaxed) { false } else { match filters.entry_allowed(&base, entry) {
-        Ok(allowed) => allowed,
-        Err(err) => { let _ = tx.send(Err(err)); false }
-    } });
+    walker.filter_entry(move |entry| {
+        if cancel.load(Ordering::Relaxed) { false } else {
+            match filters.entry_allowed(&base, entry) { Ok(allowed) => allowed, Err(err) => { let _ = tx.send(Err(err)); false } }
+        }
+    });
 }
 
 pub(crate) struct PathFilters {
-    includes: Option<GlobSet>,
-    excludes: Option<GlobSet>,
-    exts: Option<GlobSet>,
-    path_re: Option<RegexMatcher>,
-    skip_path_re: Option<RegexMatcher>,
-    skip_dirs: Option<GlobSet>,
-    skip_dir_re: Option<RegexMatcher>,
+    includes: Option<GlobSet>, excludes: Option<GlobSet>, exts: Option<GlobSet>, path_re: Option<RegexMatcher>, skip_path_re: Option<RegexMatcher>,
+    skip_dirs: Option<GlobSet>, skip_dir_re: Option<RegexMatcher>
 }
 
 impl PathFilters {
     pub(crate) fn new(walk: &WalkOptions) -> Result<Self, RgApiError> {
-        Ok(Self {
-            includes: build_globs(&walk.includes)?,
-            excludes: build_globs(&walk.excludes)?,
-            exts: build_globs(&walk.exts)?,
-            path_re: build_path_re(walk.path_re.as_deref())?,
-            skip_path_re: build_path_re(walk.skip_path_re.as_deref())?,
-            skip_dirs: build_globs(&walk.skip_dirs)?,
-            skip_dir_re: build_path_re(walk.skip_dir_re.as_deref())?,
-        })
+        Ok(Self { includes: build_globs(&walk.includes)?, excludes: build_globs(&walk.excludes)?, exts: build_globs(&walk.exts)?,
+            path_re: build_path_re(walk.path_re.as_deref())?, skip_path_re: build_path_re(walk.skip_path_re.as_deref())?,
+            skip_dirs: build_globs(&walk.skip_dirs)?, skip_dir_re: build_path_re(walk.skip_dir_re.as_deref())? })
     }
 
     pub(crate) fn path_allowed(&self, path: &Path) -> Result<bool, RgApiError> {
-        if let Some(excludes) = &self.excludes
-            && excludes.is_match(path)
-        { return Ok(false); }
-        if let Some(skip_path_re) = &self.skip_path_re
-            && re_match(skip_path_re, &path_label(path))?
-        { return Ok(false); }
-        if let Some(path_re) = &self.path_re
-            && !re_match(path_re, &path_label(path))?
-        { return Ok(false); }
-        if let Some(exts) = &self.exts
-            && !exts.is_match(path)
-        { return Ok(false); }
+        if let Some(excludes) = &self.excludes && excludes.is_match(path) { return Ok(false); }
+        if let Some(skip_path_re) = &self.skip_path_re && re_match(skip_path_re, &path_label(path))? { return Ok(false); }
+        if let Some(path_re) = &self.path_re && !re_match(path_re, &path_label(path))? { return Ok(false); }
+        if let Some(exts) = &self.exts && !exts.is_match(path) { return Ok(false); }
         if let Some(includes) = &self.includes { return Ok(includes.is_match(path)); }
         Ok(true)
     }
@@ -375,12 +324,8 @@ impl PathFilters {
         if !ft.is_dir() { return Ok(true); }
         let rel = relative_path(base, path);
         if self.excludes.as_ref().is_some_and(|globs| globs.is_match(rel)) { return Ok(false); }
-        if let Some(skip_dirs) = &self.skip_dirs
-            && skip_dirs.is_match(rel)
-        { return Ok(false); }
-        if let Some(skip_dir_re) = &self.skip_dir_re
-            && re_match(skip_dir_re, &path_label(rel))?
-        { return Ok(false); }
+        if let Some(skip_dirs) = &self.skip_dirs && skip_dirs.is_match(rel) { return Ok(false); }
+        if let Some(skip_dir_re) = &self.skip_dir_re && re_match(skip_dir_re, &path_label(rel))? { return Ok(false); }
         Ok(true)
     }
 }
@@ -398,9 +343,7 @@ fn add_glob(builder: &mut GlobSetBuilder, glob: &str) -> Result<(), RgApiError> 
     Ok(())
 }
 
-fn build_path_re(pattern: Option<&str>) -> Result<Option<RegexMatcher>, RgApiError> {
-    pattern.map(|pattern| RegexMatcher::path(pattern, false)).transpose()
-}
+fn build_path_re(pattern: Option<&str>) -> Result<Option<RegexMatcher>, RgApiError> { pattern.map(|pattern| RegexMatcher::path(pattern, false)).transpose() }
 
 fn re_match(matcher: &RegexMatcher, rel: &str) -> Result<bool, RgApiError> { matcher.is_match(rel.as_bytes()).map_err(|e| RgApiError::new(e.to_string())) }
 
@@ -411,9 +354,7 @@ mod tests {
     #[test]
     fn globs_match_names_or_root_relative_components() {
         for (glob, yes, no) in [
-            ("*.py", "src/deep/app.py", "src/app.rs"),
-            ("src/*", "src/app.py", "src/deep/app.py"),
-            ("src/**", "src/deep/app.py", "other/src/app.py"),
+            ("*.py", "src/deep/app.py", "src/app.rs"), ("src/*", "src/app.py", "src/deep/app.py"), ("src/**", "src/deep/app.py", "other/src/app.py"),
             ("tests", "src/tests", "src/tests/app.py"),
         ] {
             let globs = build_globs(&[glob.into()]).unwrap().unwrap();

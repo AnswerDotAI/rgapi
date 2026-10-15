@@ -1,14 +1,14 @@
 //! rgapi - Python-friendly wrappers around ripgrep's walking and searching crates.
 
 mod block;
-mod nb;
 mod matcher;
+mod nb;
 mod search;
 mod walk;
 
 pub use block::{BlockIter, SearchBlock, block_iter};
-pub use nb::{CellRefs, NbCell, NbIter, NbOptions, ancestor_indices, cell_refs, heading_level, nb_iter, nb_search, nb_search_file, section_range};
 pub use matcher::{RegexMatcher, compile_regex};
+pub use nb::{CellRefs, NbCell, NbIter, NbOptions, ancestor_indices, cell_refs, heading_level, nb_iter, nb_search, nb_search_file, section_range};
 pub use search::{MatchSpan, RgIter, RgOptions, SearchError, SearchKind, SearchLine, rg, rg_iter, search_path, search_text, spans_for};
 pub use walk::{FindIter, FindOptions, StreamIter, WalkOptions, find, find_iter, find_iter_with, resolve_roots};
 

@@ -21,50 +21,25 @@ struct WalkOptions(WalkOptionsCore);
 impl<'a, 'py> FromPyObject<'a, 'py> for WalkOptions {
     type Error = PyErr;
     fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        Ok(Self(WalkOptionsCore {
-            roots: obj.get_item("roots")?.extract()?,
-            includes: obj.get_item("includes")?.extract()?,
-            excludes: obj.get_item("excludes")?.extract()?,
-            exts: obj.get_item("exts")?.extract()?,
-            path_re: obj.get_item("path_re")?.extract()?,
-            skip_path_re: obj.get_item("skip_path_re")?.extract()?,
-            skip_dirs: obj.get_item("skip_dirs")?.extract()?,
-            skip_dir_re: obj.get_item("skip_dir_re")?.extract()?,
-            hidden: obj.get_item("hidden")?.extract()?,
-            ignore: obj.get_item("ignore")?.extract()?,
-            max_depth: obj.get_item("max_depth")?.extract()?,
-            min_depth: obj.get_item("min_depth")?.extract()?,
-            max_filesize: obj.get_item("max_filesize")?.extract()?,
-            follow_links: obj.get_item("follow_links")?.extract()?,
-            same_file_system: obj.get_item("same_file_system")?.extract()?,
-        }))
+        Ok(Self(WalkOptionsCore { roots: obj.get_item("roots")?.extract()?, includes: obj.get_item("includes")?.extract()?,
+            excludes: obj.get_item("excludes")?.extract()?, exts: obj.get_item("exts")?.extract()?, path_re: obj.get_item("path_re")?.extract()?,
+            skip_path_re: obj.get_item("skip_path_re")?.extract()?, skip_dirs: obj.get_item("skip_dirs")?.extract()?,
+            skip_dir_re: obj.get_item("skip_dir_re")?.extract()?, hidden: obj.get_item("hidden")?.extract()?, ignore: obj.get_item("ignore")?.extract()?,
+            max_depth: obj.get_item("max_depth")?.extract()?, min_depth: obj.get_item("min_depth")?.extract()?,
+            max_filesize: obj.get_item("max_filesize")?.extract()?, follow_links: obj.get_item("follow_links")?.extract()?,
+            same_file_system: obj.get_item("same_file_system")?.extract()? }))
     }
 }
 
 #[pyclass(name = "SearchLine", eq, skip_from_py_object)]
 #[derive(Clone)]
 struct SearchLinePy {
-    #[pyo3(get)]
-    kind: String,
-    #[pyo3(get)]
-    path: String,
-    #[pyo3(get)]
-    line_number: u64,
-    #[pyo3(get)]
-    lnhash: String,
-    #[pyo3(get)]
-    line: String,
-    #[pyo3(get)]
-    matches: Vec<(usize, usize)>,
-    display_lnhash: bool,
+    #[pyo3(get)] kind: String, #[pyo3(get)] path: String, #[pyo3(get)] line_number: u64, #[pyo3(get)] lnhash: String, #[pyo3(get)] line: String, #[pyo3(get)]
+    matches: Vec<(usize, usize)>, display_lnhash: bool
 }
 impl PartialEq for SearchLinePy {
     fn eq(&self, other: &Self) -> bool {
-        self.kind == other.kind
-            && self.path == other.path
-            && self.line_number == other.line_number
-            && self.lnhash == other.lnhash
-            && self.line == other.line
+        self.kind == other.kind && self.path == other.path && self.line_number == other.line_number && self.lnhash == other.lnhash && self.line == other.line
             && self.matches == other.matches
     }
 }
@@ -98,7 +73,8 @@ impl SearchLinePy {
     fn __str__(&self) -> String {
         let sep = if self.kind == "match" { ":" } else { "-" };
         let prefix = if self.path.is_empty() { String::new() } else { format!("{}{}", self.path, sep) };
-        if self.display_lnhash { format!("{}{}{}", prefix, self.lnhash, preview(&self.line, MAXLEN)) } else { format!("{}{}{}{}", prefix, self.line_number, sep, preview(&self.line, MAXLEN)) }
+        if self.display_lnhash { format!("{}{}{}", prefix, self.lnhash, preview(&self.line, MAXLEN)) }
+        else { format!("{}{}{}{}", prefix, self.line_number, sep, preview(&self.line, MAXLEN)) }
     }
     fn _repr_pretty_(&self, p: &Bound<'_, PyAny>, cycle: bool) -> PyResult<()> {
         let text = if cycle { "...".to_string() } else { self.__str__() };
@@ -125,10 +101,7 @@ impl RgIterPy {
     }
 }
 fn check_signals_or_cancel<T>(py: Python<'_>, iter: &StreamIter<T>) -> PyResult<()> {
-    if let Err(err) = py.check_signals() {
-        iter.cancel();
-        return Err(err);
-    }
+    if let Err(err) = py.check_signals() { iter.cancel(); return Err(err); }
     Ok(())
 }
 
@@ -138,10 +111,8 @@ fn next_stream_py<T: Send>(py: Python<'_>, iter: &mut StreamIter<T>) -> PyResult
         let res = py.detach(|| iter.next_timeout(Duration::from_millis(50)));
         check_signals_or_cancel(py, iter)?;
         match res {
-            Ok(Ok(line)) => return Ok(Some(line)),
-            Ok(Err(err)) => return Err(PyValueError::new_err(err.to_string())),
-            Err(RecvTimeoutError::Disconnected) => return Ok(None),
-            Err(RecvTimeoutError::Timeout) => continue,
+            Ok(Ok(line)) => return Ok(Some(line)), Ok(Err(err)) => return Err(PyValueError::new_err(err.to_string())),
+            Err(RecvTimeoutError::Disconnected) => return Ok(None), Err(RecvTimeoutError::Timeout) => continue
         }
     }
 }
@@ -154,33 +125,20 @@ fn collect_stream_py<T: Send, P>(py: Python<'_>, mut iter: StreamIter<T>, conv: 
         let mut wait = Duration::from_millis(50);
         if let Some(d) = deadline {
             let left = d.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                iter.cancel();
-                return Ok((res, true));
-            }
+            if left.is_zero() { iter.cancel(); return Ok((res, true)); }
             wait = wait.min(left);
         }
         let next = py.detach(|| iter.next_timeout(wait));
         check_signals_or_cancel(py, &iter)?;
         match next {
-            Ok(Ok(line)) => res.push(conv(line)),
-            Ok(Err(err)) => return Err(PyValueError::new_err(err.to_string())),
-            Err(RecvTimeoutError::Disconnected) => return Ok((res, false)),
-            Err(RecvTimeoutError::Timeout) => {}
+            Ok(Ok(line)) => res.push(conv(line)), Ok(Err(err)) => return Err(PyValueError::new_err(err.to_string())),
+            Err(RecvTimeoutError::Disconnected) => return Ok((res, false)), Err(RecvTimeoutError::Timeout) => {}
         }
     }
 }
 #[pyclass(name = "Regex", skip_from_py_object)]
 #[derive(Clone)]
-struct RegexPy {
-    #[pyo3(get)]
-    pattern: String,
-    #[pyo3(get)]
-    case_sensitive: Option<bool>,
-    #[pyo3(get)]
-    smart_case: bool,
-    matcher: rgapi::RegexMatcher,
-}
+struct RegexPy { #[pyo3(get)] pattern: String, #[pyo3(get)] case_sensitive: Option<bool>, #[pyo3(get)] smart_case: bool, matcher: rgapi::RegexMatcher }
 #[pymethods]
 impl RegexPy {
     #[new]
@@ -188,8 +146,7 @@ impl RegexPy {
     fn new(pattern: String, case_sensitive: Option<bool>, smart_case: bool) -> PyResult<Self> { compile_regex_py(pattern, case_sensitive, smart_case) }
     fn is_match(&self, text: &str) -> PyResult<bool> { self.matcher.is_match(text.as_bytes()).map_err(|e| PyValueError::new_err(e.to_string())) }
     fn finditer(&self, text: &str) -> PyResult<Vec<(usize, usize)>> {
-        spans_for(&self.matcher, text.as_bytes())
-            .map(|spans| spans.into_iter().map(|m| (m.start, m.end)).collect())
+        spans_for(&self.matcher, text.as_bytes()).map(|spans| spans.into_iter().map(|m| (m.start, m.end)).collect())
             .map_err(|e| PyValueError::new_err(e.to_string()))
     }
     fn __repr__(&self) -> String {
@@ -221,13 +178,7 @@ fn walk_base_py(walk: WalkOptions, canonical: bool, walk_root_links: bool) -> Py
 
 #[pyfunction(name = "find")]
 fn find_py(
-    py: Python<'_>,
-    walk: WalkOptions,
-    pattern: Option<String>,
-    files: bool,
-    dirs: bool,
-    timeout_ms: Option<u64>,
-    walk_root_links: bool,
+    py: Python<'_>, walk: WalkOptions, pattern: Option<String>, files: bool, dirs: bool, timeout_ms: Option<u64>, walk_root_links: bool
 ) -> PyResult<(Vec<PathBuf>, bool)> {
     let opts = FindOptions { walk: walk.0, pattern, files, dirs, ..FindOptions::default() };
     let iter = find_iter_with(&opts, walk_root_links).map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -236,36 +187,21 @@ fn find_py(
 #[pyfunction(name = "search_text")]
 fn search_text_py(matcher: PyRef<'_, RegexPy>, text: &str, path: &str, before_context: usize, after_context: usize) -> PyResult<Vec<SearchLinePy>> {
     search_text_core(path.to_string(), text, matcher.matcher.clone(), before_context, after_context, false)
-        .map(|lines| lines.into_iter().map(SearchLinePy::from).collect())
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+        .map(|lines| lines.into_iter().map(SearchLinePy::from).collect()).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 #[pyfunction(name = "search_path")]
 fn search_path_py(
-    matcher: PyRef<'_, RegexPy>,
-    path: &str,
-    display_path: Option<String>,
-    before_context: usize,
-    after_context: usize,
-) -> PyResult<Vec<SearchLinePy>> {
+    matcher: PyRef<'_, RegexPy>, path: &str, display_path: Option<String>, before_context: usize, after_context: usize) -> PyResult<Vec<SearchLinePy>> {
     let path_buf = PathBuf::from(path);
     let display = display_path.unwrap_or_else(|| path_buf.to_string_lossy().replace('\\', "/"));
     search_path_core(&path_buf, display, matcher.matcher.clone(), before_context, after_context)
-        .map(|lines| lines.into_iter().map(SearchLinePy::from).collect())
-        .map_err(|e| PyValueError::new_err(e.to_string()))
+        .map(|lines| lines.into_iter().map(SearchLinePy::from).collect()).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
 #[pyfunction(name = "rg")]
 fn rg_py(
-    py: Python<'_>,
-    walk: WalkOptions,
-    pattern: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
-    lnhash: bool,
-    timeout_ms: Option<u64>,
-) -> PyResult<(Vec<SearchLinePy>, bool)> {
+    py: Python<'_>, walk: WalkOptions, pattern: String, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize,
+    lnhash: bool, timeout_ms: Option<u64>) -> PyResult<(Vec<SearchLinePy>, bool)> {
     let opts = RgOptions { walk: walk.0, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     collect_stream_py(py, iter, move |l| search_line_py(l, lnhash), timeout_ms)
@@ -273,28 +209,15 @@ fn rg_py(
 
 #[pyfunction(name = "block_search")]
 fn block_search_py(
-    py: Python<'_>,
-    walk: WalkOptions,
-    pattern: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
-    timeout_ms: Option<u64>,
-) -> PyResult<(Vec<BlockRow>, bool)> {
+    py: Python<'_>, walk: WalkOptions, pattern: String, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize,
+    timeout_ms: Option<u64>) -> PyResult<(Vec<BlockRow>, bool)> {
     let opts = RgOptions { walk: walk.0, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     let iter = block_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     collect_stream_py(py, iter, block_row, timeout_ms)
 }
 #[pyfunction(name = "rg_iter")]
 fn rg_iter_py(
-    walk: WalkOptions,
-    pattern: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
-    lnhash: bool,
+    walk: WalkOptions, pattern: String, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize, lnhash: bool
 ) -> PyResult<RgIterPy> {
     let opts = RgOptions { walk: walk.0, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     rg_iter_core(&opts).map(|inner| RgIterPy { inner, display_lnhash: lnhash }).map_err(|e| PyValueError::new_err(e.to_string()))
@@ -366,11 +289,8 @@ fn drain_stream<T>(iter: &mut StreamIter<T>, flag: &Arc<AtomicBool>, deadline: O
     (rows, timed_out, err)
 }
 
-fn stream_async<T, C>(cb: Py<PyAny>, mut iter: StreamIter<T>, deadline: Option<Instant>, conv: C) -> AsyncHandlePy
-where
-    T: Send + 'static,
-    C: Fn(Python<'_>, Vec<T>, bool) -> PyResult<Py<PyAny>> + Send + 'static,
-{
+fn stream_async<T, C>(cb: Py<PyAny>, mut iter: StreamIter<T>, deadline: Option<Instant>, conv: C) -> AsyncHandlePy where T: Send + 'static,
+    C: Fn(Python<'_>, Vec<T>, bool) -> PyResult<Py<PyAny>> + Send + 'static {
     let cancel = iter.cancel_flag();
     let flag = cancel.clone();
     std::thread::spawn(move || {
@@ -380,8 +300,7 @@ where
             let _ = match err {
                 Some(e) => cb.call1(py, (py.None(), e)),
                 None => match conv(py, rows, timed_out) {
-                    Ok(res) => cb.call1(py, (res, None::<String>)),
-                    Err(_) => cb.call1(py, (py.None(), "internal conversion error".to_string())),
+                    Ok(res) => cb.call1(py, (res, None::<String>)), Err(_) => cb.call1(py, (py.None(), "internal conversion error".to_string()))
                 },
             };
         });
@@ -389,11 +308,8 @@ where
     AsyncHandlePy { cancel }
 }
 
-fn stream_iter_async<T, C>(cb: Py<PyAny>, mut iter: StreamIter<T>, batch_max: usize, conv: C) -> AsyncHandlePy
-where
-    T: Send + 'static,
-    C: Fn(Python<'_>, Vec<T>) -> PyResult<Py<PyAny>> + Send + 'static,
-{
+fn stream_iter_async<T, C>(cb: Py<PyAny>, mut iter: StreamIter<T>, batch_max: usize, conv: C) -> AsyncHandlePy where T: Send + 'static,
+    C: Fn(Python<'_>, Vec<T>) -> PyResult<Py<PyAny>> + Send + 'static {
     let cancel = iter.cancel_flag();
     let flag = cancel.clone();
     std::thread::spawn(move || {
@@ -401,23 +317,13 @@ where
         loop {
             if flag.load(Ordering::Relaxed) { break; }
             let first = match iter.next_timeout(Duration::from_millis(50)) {
-                Ok(Ok(line)) => line,
-                Ok(Err(e)) => {
-                    err = Some(e.to_string());
-                    break;
-                }
-                Err(RecvTimeoutError::Disconnected) => break,
-                Err(RecvTimeoutError::Timeout) => continue,
+                Ok(Ok(line)) => line, Ok(Err(e)) => { err = Some(e.to_string()); break; } Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Timeout) => continue
             };
             let mut batch = vec![first];
             while batch.len() < batch_max {
                 match iter.next_timeout(Duration::ZERO) {
-                    Ok(Ok(line)) => batch.push(line),
-                    Ok(Err(e)) => {
-                        err = Some(e.to_string());
-                        break;
-                    }
-                    Err(_) => break,
+                    Ok(Ok(line)) => batch.push(line), Ok(Err(e)) => { err = Some(e.to_string()); break; } Err(_) => break
                 }
             }
             let failed = Python::attach(|py| match conv(py, batch) { Ok(res) => cb.call1(py, (res, None::<String>)).is_err(), Err(_) => true });
@@ -432,16 +338,8 @@ where
 
 #[pyfunction(name = "rg_async")]
 fn rg_async_py(
-    cb: Py<PyAny>,
-    walk: WalkOptions,
-    pattern: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
-    lnhash: bool,
-    timeout_ms: Option<u64>,
-) -> PyResult<AsyncHandlePy> {
+    cb: Py<PyAny>, walk: WalkOptions, pattern: String, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize,
+    lnhash: bool, timeout_ms: Option<u64>) -> PyResult<AsyncHandlePy> {
     let opts = RgOptions { walk: walk.0, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
@@ -453,15 +351,8 @@ fn rg_async_py(
 
 #[pyfunction(name = "block_search_async")]
 fn block_search_async_py(
-    cb: Py<PyAny>,
-    walk: WalkOptions,
-    pattern: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
-    timeout_ms: Option<u64>,
-) -> PyResult<AsyncHandlePy> {
+    cb: Py<PyAny>, walk: WalkOptions, pattern: String, case_sensitive: Option<bool>, smart_case: bool, before_context: usize, after_context: usize,
+    timeout_ms: Option<u64>) -> PyResult<AsyncHandlePy> {
     let opts = RgOptions { walk: walk.0, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     let iter = block_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
@@ -473,16 +364,8 @@ fn block_search_async_py(
 
 #[pyfunction(name = "rg_iter_async")]
 fn rg_iter_async_py(
-    cb: Py<PyAny>,
-    batch_max: usize,
-    walk: WalkOptions,
-    pattern: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    before_context: usize,
-    after_context: usize,
-    lnhash: bool,
-) -> PyResult<AsyncHandlePy> {
+    cb: Py<PyAny>, batch_max: usize, walk: WalkOptions, pattern: String, case_sensitive: Option<bool>, smart_case: bool, before_context: usize,
+    after_context: usize, lnhash: bool) -> PyResult<AsyncHandlePy> {
     let opts = RgOptions { walk: walk.0, pattern, case_sensitive, smart_case, before_context, after_context, ..RgOptions::default() };
     let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     Ok(stream_iter_async(cb, iter, batch_max, move |py, rows| {
@@ -497,8 +380,7 @@ fn panic_probe_py(py: Python<'_>, root: PathBuf, walk: bool) -> PyResult<()> {
     if walk {
         let opts = FindOptions { walk: walk_opts, panic_probe: true, ..FindOptions::default() };
         find(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
-    }
-    else {
+    } else {
         let opts = RgOptions { walk: walk_opts, pattern: "panic_probe".to_string(), panic_probe: true, ..RgOptions::default() };
         let iter = rg_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
         collect_stream_py(py, iter, |l| search_line_py(l, false), None)?;
@@ -509,17 +391,8 @@ fn panic_probe_py(py: Python<'_>, root: PathBuf, walk: bool) -> PyResult<()> {
 type BlockRow = (String, usize, u64, u64, String, String, String, String, Vec<SearchLinePy>);
 
 fn block_row(block: SearchBlock) -> BlockRow {
-    (
-        block.path,
-        block.block_index,
-        block.start_line,
-        block.end_line,
-        block.start_lnhash,
-        block.end_lnhash,
-        block.kind.to_string(),
-        block.source,
-        block.matches.into_iter().map(SearchLinePy::from).collect(),
-    )
+    (block.path, block.block_index, block.start_line, block.end_line, block.start_lnhash, block.end_lnhash, block.kind.to_string(), block.source,
+        block.matches.into_iter().map(SearchLinePy::from).collect())
 }
 
 type NbRow = (String, usize, String, String, String, String, Vec<SearchLinePy>);
@@ -540,15 +413,8 @@ impl NbIterPy {
 
 #[pyfunction(name = "nb_search")]
 fn nb_search_py(
-    py: Python<'_>,
-    walk: WalkOptions,
-    pattern: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
-    timeout_ms: Option<u64>,
-) -> PyResult<(Vec<NbRow>, bool)> {
+    py: Python<'_>, walk: WalkOptions, pattern: String, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool,
+    timeout_ms: Option<u64>) -> PyResult<(Vec<NbRow>, bool)> {
     let opts = NbOptions { walk: walk.0, pattern, case_sensitive, smart_case, cell_context, multiline };
     let iter = nb_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     collect_stream_py(py, iter, nb_row, timeout_ms)
@@ -562,15 +428,8 @@ fn nb_iter_py(walk: WalkOptions, pattern: String, case_sensitive: Option<bool>, 
 
 #[pyfunction(name = "nb_search_async")]
 fn nb_search_async_py(
-    cb: Py<PyAny>,
-    walk: WalkOptions,
-    pattern: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
-    timeout_ms: Option<u64>,
-) -> PyResult<AsyncHandlePy> {
+    cb: Py<PyAny>, walk: WalkOptions, pattern: String, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool,
+    timeout_ms: Option<u64>) -> PyResult<AsyncHandlePy> {
     let opts = NbOptions { walk: walk.0, pattern, case_sensitive, smart_case, cell_context, multiline };
     let iter = nb_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
@@ -582,14 +441,7 @@ fn nb_search_async_py(
 
 #[pyfunction(name = "nb_iter_async")]
 fn nb_iter_async_py(
-    cb: Py<PyAny>,
-    batch_max: usize,
-    walk: WalkOptions,
-    pattern: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
+    cb: Py<PyAny>, batch_max: usize, walk: WalkOptions, pattern: String, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool
 ) -> PyResult<AsyncHandlePy> {
     let opts = NbOptions { walk: walk.0, pattern, case_sensitive, smart_case, cell_context, multiline };
     let iter = nb_iter_core(&opts).map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -601,13 +453,7 @@ fn nb_iter_async_py(
 
 #[pyfunction(name = "nb_search_file")]
 fn nb_search_file_py(
-    pattern: &str,
-    path: &str,
-    display_path: String,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
+    pattern: &str, path: &str, display_path: String, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool
 ) -> PyResult<Vec<NbRow>> {
     let cells = nb_search_file(Path::new(path), display_path, pattern, case_sensitive, smart_case, cell_context, multiline)
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -616,15 +462,8 @@ fn nb_search_file_py(
 
 impl From<SearchLine> for SearchLinePy {
     fn from(line: SearchLine) -> Self {
-        Self {
-            kind: line.kind.as_str().to_string(),
-            path: line.path,
-            line_number: line.line_number,
-            lnhash: line.lnhash,
-            line: line.line,
-            matches: line.matches.into_iter().map(|m| (m.start, m.end)).collect(),
-            display_lnhash: false,
-        }
+        Self { kind: line.kind.as_str().to_string(), path: line.path, line_number: line.line_number, lnhash: line.lnhash, line: line.line,
+            matches: line.matches.into_iter().map(|m| (m.start, m.end)).collect(), display_lnhash: false }
     }
 }
 

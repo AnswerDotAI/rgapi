@@ -7,8 +7,8 @@ use crate::RegexMatcher;
 use ignore::{DirEntry, WalkState};
 
 use crate::RgApiError;
-use crate::search::{RgOptions, SearchLine, format_lnhash, search_text};
 use crate::compile_regex;
+use crate::search::{RgOptions, SearchLine, format_lnhash, search_text};
 use crate::walk::{PathFilters, StreamIter, entry_err, rel_path, resolve_roots, spawn_walk};
 
 /// One blank-line-delimited block containing a match, or context for one.
@@ -65,34 +65,18 @@ fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, before_conte
         let end = (i + after_context + 1).min(blocks.len());
         for j in start..end { emit.entry(j).or_insert(false); }
     }
-    Ok(emit
-        .into_iter()
-        .map(|(i, is_match)| {
-            let block = &blocks[i];
-            SearchBlock {
-                path: disp.clone(),
-                block_index: i,
-                start_line: block.start_line,
-                end_line: block.end_line,
-                start_lnhash: format_lnhash(block.start_line, block.source.lines().next().unwrap()),
-                end_lnhash: format_lnhash(block.end_line, block.source.lines().last().unwrap()),
-                kind: if is_match { "match" } else { "context" },
-                source: block.source.clone(),
-                matches: matched.remove(&i).unwrap_or_default(),
-            }
-        })
-        .collect())
+    Ok(emit.into_iter().map(|(i, is_match)| {
+        let block = &blocks[i];
+        SearchBlock { path: disp.clone(), block_index: i, start_line: block.start_line, end_line: block.end_line,
+            start_lnhash: format_lnhash(block.start_line, block.source.lines().next().unwrap()),
+            end_lnhash: format_lnhash(block.end_line, block.source.lines().last().unwrap()), kind: if is_match { "match" } else { "context" },
+            source: block.source.clone(), matches: matched.remove(&i).unwrap_or_default() }
+    }).collect())
 }
 
 fn block_entry(
-    entry: Result<DirEntry, ignore::Error>,
-    base: &Path,
-    filters: &PathFilters,
-    matcher: &RegexMatcher,
-    before_context: usize,
-    after_context: usize,
-    max_depth: Option<usize>,
-) -> Result<Vec<SearchBlock>, RgApiError> {
+    entry: Result<DirEntry, ignore::Error>, base: &Path, filters: &PathFilters, matcher: &RegexMatcher, before_context: usize, after_context: usize,
+    max_depth: Option<usize>) -> Result<Vec<SearchBlock>, RgApiError> {
     let dent = match entry { Ok(dent) => dent, Err(err) => return entry_err(err, max_depth).map_or(Ok(Vec::new()), Err) };
     let path = dent.path();
     let Some(ft) = dent.file_type() else { return Ok(Vec::new()); };
@@ -116,10 +100,7 @@ pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
                 for block in blocks { if cancel.load(Ordering::Relaxed) || tx.send(Ok(block)).is_err() { return WalkState::Quit; } }
                 WalkState::Continue
             }
-            Err(err) => {
-                let _ = tx.send(Err(err));
-                WalkState::Quit
-            }
+            Err(err) => { let _ = tx.send(Err(err)); WalkState::Quit }
         }
     }))
 }

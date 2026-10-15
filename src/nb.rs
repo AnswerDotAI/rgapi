@@ -3,14 +3,14 @@ use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock};
 
-use fancy_regex::Regex;
 use crate::RegexMatcher;
+use fancy_regex::Regex;
 use ignore::{DirEntry, WalkState};
 use serde::Deserialize;
 
 use crate::RgApiError;
-use crate::search::{SearchLine, search_text};
 use crate::compile_regex;
+use crate::search::{SearchLine, search_text};
 use crate::walk::{PathFilters, StreamIter, WalkOptions, entry_err, rel_path, resolve_roots, spawn_walk};
 
 static HEADING_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#{1,6} \w").unwrap());
@@ -80,10 +80,7 @@ pub fn cell_refs(cell: &serde_json::Value) -> CellRefs {
     let prompt = cell["metadata"]["solveit_ai"] == true;
     let mut res = CellRefs::default();
     if prompt { (res.vars, res.cmds) = (sigil_caps(&src, r"\$", "[^`]+"), sigil_caps(&src, "!", "[^`]+")); }
-    if prompt || cell["cell_type"] == "markdown" {
-        res.tools = tool_names(&src);
-        return res;
-    }
+    if prompt || cell["cell_type"] == "markdown" { res.tools = tool_names(&src); return res; }
     for o in cell["outputs"].as_array().into_iter().flatten() {
         if matches!(o["output_type"].as_str(), Some("display_data" | "execute_result")) { res.tools.extend(tool_names(&nb_text(&o["data"]["text/markdown"]))); }
     }
@@ -92,12 +89,7 @@ pub fn cell_refs(cell: &serde_json::Value) -> CellRefs {
 
 #[derive(Debug, Clone, Default)]
 pub struct NbOptions {
-    pub walk: WalkOptions,
-    pub pattern: String,
-    pub case_sensitive: Option<bool>,
-    pub smart_case: bool,
-    pub cell_context: usize,
-    pub multiline: bool,
+    pub walk: WalkOptions, pub pattern: String, pub case_sensitive: Option<bool>, pub smart_case: bool, pub cell_context: usize, pub multiline: bool
 }
 
 /// One emitted cell (a match, or context for a match).
@@ -117,14 +109,7 @@ pub struct NbCell {
 struct RawNb { #[serde(default)] cells: Vec<RawCell> }
 
 #[derive(Deserialize)]
-struct RawCell {
-    #[serde(default)]
-    id: Option<serde_json::Value>,
-    #[serde(default)]
-    cell_type: Option<String>,
-    #[serde(default)]
-    source: Source,
-}
+struct RawCell { #[serde(default)] id: Option<serde_json::Value>, #[serde(default)] cell_type: Option<String>, #[serde(default)] source: Source }
 
 impl RawCell {
     fn id_string(&self, index: usize) -> String {
@@ -135,14 +120,11 @@ impl RawCell {
 // nbformat `source` is a list of lines or a single string (or absent/null).
 #[derive(Deserialize, Default)]
 #[serde(untagged)]
-enum Source {
-    Lines(Vec<String>),
-    Text(String),
-    #[default]
-    Empty,
-}
+enum Source { Lines(Vec<String>), Text(String), #[default] Empty }
 
-impl Source { fn text(&self) -> String { match self { Source::Lines(v) => v.concat(), Source::Text(s) => s.clone(), Source::Empty => String::new() } } }
+impl Source {
+    fn text(&self) -> String { match self { Source::Lines(v) => v.concat(), Source::Text(s) => s.clone(), Source::Empty => String::new() } }
+}
 
 fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, cell_context: usize, multiline: bool) -> Result<Vec<NbCell>, RgApiError> {
     // Not a parseable notebook (bad JSON, or JSON that isn't a notebook): skip, like a binary file.
@@ -173,13 +155,7 @@ fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, cell_context
 }
 
 pub fn nb_search_file(
-    path: &Path,
-    display_path: String,
-    pattern: &str,
-    case_sensitive: Option<bool>,
-    smart_case: bool,
-    cell_context: usize,
-    multiline: bool,
+    path: &Path, display_path: String, pattern: &str, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool
 ) -> Result<Vec<NbCell>, RgApiError> {
     let matcher = compile_regex(pattern, case_sensitive, smart_case, multiline)?;
     let bytes = match std::fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
@@ -187,14 +163,8 @@ pub fn nb_search_file(
 }
 
 fn nb_entry(
-    entry: Result<DirEntry, ignore::Error>,
-    base: &Path,
-    filters: &PathFilters,
-    matcher: &RegexMatcher,
-    cell_context: usize,
-    multiline: bool,
-    max_depth: Option<usize>,
-) -> Result<Vec<NbCell>, RgApiError> {
+    entry: Result<DirEntry, ignore::Error>, base: &Path, filters: &PathFilters, matcher: &RegexMatcher, cell_context: usize, multiline: bool,
+    max_depth: Option<usize>) -> Result<Vec<NbCell>, RgApiError> {
     let dent = match entry { Ok(dent) => dent, Err(err) => return entry_err(err, max_depth).map_or(Ok(Vec::new()), Err) };
     let path = dent.path();
     let Some(ft) = dent.file_type() else { return Ok(Vec::new()); };
@@ -218,10 +188,7 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
                 for cell in cells { if cancel.load(Ordering::Relaxed) || tx.send(Ok(cell)).is_err() { return WalkState::Quit; } }
                 WalkState::Continue
             }
-            Err(err) => {
-                let _ = tx.send(Err(err));
-                WalkState::Quit
-            }
+            Err(err) => { let _ = tx.send(Err(err)); WalkState::Quit }
         }
     }))
 }
