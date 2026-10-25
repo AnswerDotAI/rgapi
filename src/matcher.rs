@@ -4,6 +4,13 @@ use regex_syntax::{ast::{self, Ast, Visitor}, hir::{Class, Hir, HirKind}};
 
 use crate::RgApiError;
 
+/// fancy-regex counts every start position of an unanchored search against its
+/// backtracking limit. Its default of one million therefore fails hard patterns, such as
+/// those using backreferences, on lines longer than about a million characters. This limit allows
+/// lines of about 20 million characters. A catastrophic pattern still fails within about
+/// 0.2 seconds.
+const BACKTRACK_LIMIT: usize = 20_000_000;
+
 /// A fancy-regex matcher for grep-searcher. Ordinary line-safe patterns search whole
 /// buffers; other line-oriented patterns search individual lines, without terminators.
 /// Both paths use the same regex engine and return UTF-8 byte offsets.
@@ -28,7 +35,8 @@ impl RegexMatcher {
             return Err(RgApiError::new("a literal newline or carriage return is not allowed in a regex without multiline=True"));
         }
         let insensitive = case_sensitive.map_or(smart_case && analysis.literal && !analysis.uppercase, |s| !s);
-        let regex = RegexBuilder::new(pattern).multi_line(line_anchors).crlf(line_anchors).case_insensitive(insensitive).build().map_err(regex_error)?;
+        let regex = RegexBuilder::new(pattern).multi_line(line_anchors).crlf(line_anchors).case_insensitive(insensitive).backtrack_limit(BACKTRACK_LIMIT)
+            .build().map_err(regex_error)?;
         Ok(Self { regex, line_oriented, whole_buffer: !line_oriented || !analysis.line_local })
     }
 
@@ -116,10 +124,14 @@ impl Analysis {
                 if let HirKind::Literal(lit) = hir.kind() { self.literal_newline |= lit.0.iter().any(|b| matches!(b, b'\r' | b'\n')); }
             }
             Expr::Any { newline, crlf } => self.line_local |= *newline || !crlf,
-            Expr::Assertion(Assertion::StartText | Assertion::EndText | Assertion::EndTextIgnoreTrailingNewlines { .. }) => self.line_local = true,
-            Expr::Empty | Expr::Assertion(_) | Expr::Concat(_) | Expr::Alt(_) | Expr::Group(_) | Expr::Repeat { .. } => {}
-            // Backreferences, lookaround and other fancy constructs use line-local
-            // input so captures and assertions cannot inspect neighbouring lines.
+            Expr::Empty
+            | Expr::Concat(_)
+            | Expr::Alt(_)
+            | Expr::Group(_)
+            | Expr::Repeat { .. }
+            | Expr::Assertion(Assertion::StartLine { .. } | Assertion::EndLine { .. }) => {}
+            // Text anchors, word boundaries and fancy constructs use line-local input,
+            // so captures and assertions cannot inspect neighbouring lines.
             _ => self.line_local = true,
         }
         Ok(())

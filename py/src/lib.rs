@@ -31,7 +31,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for WalkOptions {
     }
 }
 
-#[pyclass(name = "SearchLine", eq, skip_from_py_object)]
+#[pyclass(name = "SearchLine", eq)]
 #[derive(Clone)]
 struct SearchLinePy {
     #[pyo3(get)] kind: String, #[pyo3(get)] path: String, #[pyo3(get)] line_number: u64, #[pyo3(get)] lnhash: String, #[pyo3(get)] line: String, #[pyo3(get)]
@@ -136,7 +136,7 @@ fn collect_stream_py<T: Send, P>(py: Python<'_>, mut iter: StreamIter<T>, conv: 
         }
     }
 }
-#[pyclass(name = "Regex", skip_from_py_object)]
+#[pyclass(name = "Regex")]
 #[derive(Clone)]
 struct RegexPy { #[pyo3(get)] pattern: String, #[pyo3(get)] case_sensitive: Option<bool>, #[pyo3(get)] smart_case: bool, matcher: rgapi::RegexMatcher }
 #[pymethods]

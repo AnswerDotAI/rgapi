@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from rgapi import _core, MAXLEN
-from rgapi import BlockResults, PathResults, Regex, SearchResults, compile, fd, fd_iter, rg, rg_iter, rgstr, search_path, search_text, walk
+from rgapi import BlockResults, PathResults, Regex, SearchResults, compile, fd, fd_iter, rg, rg_iter, rgstr, search_path, search_text
 
 
 def make_tree(tmp_path):
@@ -33,41 +33,41 @@ def test_fd_paths_preserve_names_and_root_links(tmp_path):
     broken.symlink_to("missing")
     file_link = tmp_path / "file-link"
     file_link.symlink_to(file)
-    assert fd(target) == [file]
-    assert fd(link) == [link] and fd(link)[0].is_symlink()
-    assert fd(broken) == [broken] and fd(broken)[0].readlink() == Path("missing")
-    assert fd(file_link) == [file_link]
-    assert fd(link, follow_links=True) == [link / "app.py"]
-    assert fd(file_link, follow_links=True) == [file_link]
-    assert fd(broken, follow_links=True) == [broken]
-    assert broken in fd(tmp_path, follow_links=True)
-    assert fd(link, min_depth=1) == []
-    assert "alias" in str(fd(link))
+    assert fd(root=target) == [file]
+    assert fd(root=link) == [link] and fd(root=link)[0].is_symlink()
+    assert fd(root=broken) == [broken] and fd(root=broken)[0].readlink() == Path("missing")
+    assert fd(root=file_link) == [file_link]
+    assert fd(root=link, follow_links=True) == [link / "app.py"]
+    assert fd(root=file_link, follow_links=True) == [file_link]
+    assert fd(root=broken, follow_links=True) == [broken]
+    assert broken in fd(root=tmp_path, follow_links=True)
+    assert fd(root=link, min_depth=1) == []
+    assert "alias" in str(fd(root=link))
     if os.name != "posix": return
     names = [r"back\slash.py"]
     if sys.platform == "linux": names.append(os.fsdecode(b"raw-\xff.py"))
     for name in names:
         path = target / name
         path.write_text("native name")
-        assert fd(target, include="*.py", pattern="^(back|raw)").count(path) == 1
-        assert fd(path) == [path]
-        assert next(fd_iter(path)).read_text() == "native name"
+        assert fd("^(back|raw)", target, include="*.py").count(path) == 1
+        assert fd(root=path) == [path]
+        assert next(fd_iter(root=path)).read_text() == "native name"
 
 
 def test_fd_paths_respect_ignore_hidden_and_globs(tmp_path):
     make_tree(tmp_path)
-    found = set(fd(str(tmp_path)))
+    found = set(fd(root=str(tmp_path)))
     assert tmp_path/"src/app.py" in found
     assert tmp_path/"src/skip.log" not in found
     assert tmp_path/"ignored.txt" not in found
     assert tmp_path/".hidden" not in found
     assert all(isinstance(path, Path) and path.is_absolute() for path in found)
-    assert tmp_path/".hidden" in set(fd(str(tmp_path), hidden=True))
-    assert set(fd(str(tmp_path), glob="*.py")) == {tmp_path/"src/app.py"}
-    assert set(fd(str(tmp_path), include="*.py")) == {tmp_path/"src/app.py"}
-    assert set(fd(str(tmp_path), ext="py")) == {tmp_path/"src/app.py"}
-    assert set(fd(str(tmp_path), exclude="*.py")) == {tmp_path/"bad.txt", tmp_path/"bin.dat"}
-    assert set(walk(str(tmp_path), files=True, dirs=False)) == found
+    assert tmp_path/".hidden" in set(fd(root=str(tmp_path), hidden=True))
+    assert set(fd(root=str(tmp_path), glob="*.py")) == {tmp_path/"src/app.py"}
+    assert set(fd(root=str(tmp_path), include="*.py")) == {tmp_path/"src/app.py"}
+    assert set(fd(root=str(tmp_path), ext="py")) == {tmp_path/"src/app.py"}
+    assert set(fd(root=str(tmp_path), exclude="*.py")) == {tmp_path/"bad.txt", tmp_path/"bin.dat"}
+    assert set(fd(root=str(tmp_path))) == found
 
 def test_ext_composes_as_and_with_include(tmp_path):
     from rgapi import nbrg
@@ -75,9 +75,9 @@ def test_ext_composes_as_and_with_include(tmp_path):
     (tmp_path / "src" / "app.rs").write_text("alpha\nTODO here\n")
     write_nb(tmp_path / "one.ipynb", [_cell("code", ["foo = 1\n"], cid="c1")])
     write_nb(tmp_path / "two.ipynb", [_cell("code", ["foo = 2\n"], cid="c2")])
-    assert set(fd(tmp_path, ext="py", include="src/*")) == {tmp_path/"src/app.py"}
-    assert fd(tmp_path, ext="py", include="*.rs") == []
-    assert set(fd(tmp_path, ext=["py", "rs"], include="app*")) == {tmp_path/"src/app.py", tmp_path/"src/app.rs"}
+    assert set(fd(root=tmp_path, ext="py", include="src/*")) == {tmp_path/"src/app.py"}
+    assert fd(root=tmp_path, ext="py", include="*.rs") == []
+    assert set(fd(root=tmp_path, ext=["py", "rs"], include="app*")) == {tmp_path/"src/app.py", tmp_path/"src/app.rs"}
     assert [r.path for r in rg("TODO", tmp_path, ext="rs", include="app*")] == ["src/app.rs"]
     assert rg("TODO", tmp_path, ext="py", glob="*.rs", paths=True) == []
     assert [c.cell_id for c in nbrg("foo", tmp_path, include="one.ipynb")] == ["c1"]
@@ -89,17 +89,17 @@ def test_fd_pattern_is_basename_regex_with_smart_case(tmp_path):
     (tmp_path / "match-dir").mkdir()
     (tmp_path / "match-dir" / "other.txt").touch()
 
-    assert set(fd(tmp_path, pattern=r"^app\.(py|rs)$")) == {tmp_path/"nested/App.py", tmp_path/"nested/app.rs"}
-    assert fd(tmp_path, pattern=r"^App\.py$") == [tmp_path/"nested/App.py"]
-    assert fd(tmp_path, pattern=r"match-dir") == []
-    with pytest.raises(ValueError): fd(tmp_path, pattern=r"(")
+    assert set(fd(r"^app\.(py|rs)$", tmp_path)) == {tmp_path/"nested/App.py", tmp_path/"nested/app.rs"}
+    assert fd(r"^App\.py$", tmp_path) == [tmp_path/"nested/App.py"]
+    assert fd(r"match-dir", tmp_path) == []
+    with pytest.raises(ValueError): fd(r"(", tmp_path)
 
 def test_pathlike_arguments_and_expanduser(tmp_path, monkeypatch):
     from rgapi import search_nb
     make_tree(tmp_path)
     write_nb(tmp_path / "one.ipynb", [_cell("code", ["TODO\n"], cid="c1")])
-    assert tmp_path/"src/app.py" in fd(tmp_path)
-    assert walk(tmp_path, path_re=r"\.py$") == [tmp_path/"src/app.py"]
+    assert tmp_path/"src/app.py" in fd(root=tmp_path)
+    assert fd(root=tmp_path, path_re=r"\.py$") == [tmp_path/"src/app.py"]
     assert [r.path for r in rg("TODO", tmp_path, include="*.py")] == ["src/app.py"]
     assert list(rg_iter("TODO", tmp_path, include="*.py")) == rg("TODO", tmp_path, include="*.py")
     matcher = compile("TODO")
@@ -111,7 +111,7 @@ def test_pathlike_arguments_and_expanduser(tmp_path, monkeypatch):
     assert search_nb("TODO", tmp_path / "one.ipynb", display_path=nb_display)[0].path == str(nb_display)
 
     monkeypatch.setenv("HOME", str(tmp_path))
-    assert fd("~", glob="*.py") == [tmp_path/"src/app.py"]
+    assert fd(root="~", glob="*.py") == [tmp_path/"src/app.py"]
 
 
 def test_relative_root_spellings(tmp_path, monkeypatch):
@@ -121,8 +121,8 @@ def test_relative_root_spellings(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     for root in (".", "./", "src/..", tmp_path):
         base = Path(root).absolute()
-        assert fd(root, ext="py") == [base/"src/app.py"]
-        assert walk(root, path_re=r"\.py$") == [base/"src/app.py"]
+        assert fd(root=root, ext="py") == [base/"src/app.py"]
+        assert fd(root=root, path_re=r"\.py$") == [base/"src/app.py"]
         assert base/"src" in ls(root)
         assert [r.path for r in rg("TODO", root, ext="py")] == ["src/app.py"]
         assert [r.path for r in rg_iter("TODO", root, ext="py")] == ["src/app.py"]
@@ -131,7 +131,7 @@ def test_relative_root_spellings(tmp_path, monkeypatch):
     matcher = compile("TODO")
     for path in ("src/app.py", "./src/app.py", "src/../src/app.py"):
         assert search_path(matcher, path)[0].line == "TODO here"
-        assert fd(path) == [Path(path).absolute()]
+        assert fd(root=path) == [Path(path).absolute()]
         assert [r.path for r in rg("TODO", path)] == ["app.py"]
     for path in ("one.ipynb", "./one.ipynb", "src/../one.ipynb"):
         assert [c.cell_id for c in search_nb("read_csv", path)] == ["c1"]
@@ -147,31 +147,31 @@ def test_path_filters_prune_dirs_and_follow_links(tmp_path):
     (tmp_path / "b.py").write_text("TODO b\n")
     (tmp_path / "a.py").write_text("TODO a\n")
 
-    assert set(fd(str(tmp_path), path_re=r"\.py$")) == {tmp_path/p for p in ("a.py", "b.py", "skip/app.py", "src/app.py")}
-    assert fd(str(tmp_path), path_re=r"src/.*\.py$") == [tmp_path/"src/app.py"]
-    assert set(fd(str(tmp_path), path_re=r"\.py$", skip_path_re=r"(^|/)b\.py$", skip_dir="skip")) == {tmp_path/"a.py", tmp_path/"src/app.py"}
-    assert walk(str(tmp_path), path_re=r"\.txt$") == [tmp_path/"src/note.txt"]
+    assert set(fd(root=str(tmp_path), path_re=r"\.py$")) == {tmp_path/p for p in ("a.py", "b.py", "skip/app.py", "src/app.py")}
+    assert fd(root=str(tmp_path), path_re=r"src/.*\.py$") == [tmp_path/"src/app.py"]
+    assert set(fd(root=str(tmp_path), path_re=r"\.py$", skip_path_re=r"(^|/)b\.py$", skip_dir="skip")) == {tmp_path/"a.py", tmp_path/"src/app.py"}
+    assert fd(root=str(tmp_path), path_re=r"\.txt$") == [tmp_path/"src/note.txt"]
     assert {r.path for r in rg("TODO", str(tmp_path), path_re=r"\.py$", skip_dir_re=r"^skip$")} == {"a.py", "b.py", "src/app.py"}
 
     link = tmp_path / "linked"
     try: link.symlink_to(tmp_path / "src", target_is_directory=True)
     except OSError: return
-    assert fd(str(tmp_path), path_re=r"linked/.*\.py$", follow_links=False) == []
-    assert fd(str(tmp_path), path_re=r"linked/.*\.py$", follow_links=True) == [tmp_path/"linked/app.py"]
+    assert fd(root=str(tmp_path), path_re=r"linked/.*\.py$", follow_links=False) == []
+    assert fd(root=str(tmp_path), path_re=r"linked/.*\.py$", follow_links=True) == [tmp_path/"linked/app.py"]
 
 def test_rgignore_is_honored(tmp_path):
     (tmp_path / ".rgignore").write_text("only_rg.txt\n")
     (tmp_path / "only_rg.txt").write_text("hi\n")
     (tmp_path / "keep.txt").write_text("hi\n")
-    assert set(fd(str(tmp_path))) == {tmp_path/"keep.txt"}
-    assert set(fd(str(tmp_path), ignore=False)) == {tmp_path/"keep.txt", tmp_path/"only_rg.txt"}
+    assert set(fd(root=str(tmp_path))) == {tmp_path/"keep.txt"}
+    assert set(fd(root=str(tmp_path), ignore=False)) == {tmp_path/"keep.txt", tmp_path/"only_rg.txt"}
 
 def test_rgignore_can_override_gitignore(tmp_path):
     (tmp_path / ".gitignore").write_text("*/\n")
     (tmp_path / ".rgignore").write_text("!*/\n")
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "app.py").write_text("hi\n")
-    assert tmp_path/"sub/app.py" in set(fd(str(tmp_path)))
+    assert tmp_path/"sub/app.py" in set(fd(root=str(tmp_path)))
 
 def test_depth_size_and_filesystem_options(tmp_path):
     (tmp_path / "top.txt").write_text("TODO\n")
@@ -180,10 +180,10 @@ def test_depth_size_and_filesystem_options(tmp_path):
     (sub / "small.txt").write_text("TODO\n")
     (sub / "large.txt").write_text("TODO large\n")
 
-    assert fd(str(tmp_path), max_depth=1) == [tmp_path/"top.txt"]
-    assert set(fd(str(tmp_path), min_depth=2)) == {sub/"large.txt", sub/"small.txt"}
-    assert set(fd(str(tmp_path), max_filesize=5)) == {sub/"small.txt", tmp_path/"top.txt"}
-    assert set(fd(str(tmp_path), same_file_system=True)) == {sub/"large.txt", sub/"small.txt", tmp_path/"top.txt"}
+    assert fd(root=str(tmp_path), max_depth=1) == [tmp_path/"top.txt"]
+    assert set(fd(root=str(tmp_path), min_depth=2)) == {sub/"large.txt", sub/"small.txt"}
+    assert set(fd(root=str(tmp_path), max_filesize=5)) == {sub/"small.txt", tmp_path/"top.txt"}
+    assert set(fd(root=str(tmp_path), same_file_system=True)) == {sub/"large.txt", sub/"small.txt", tmp_path/"top.txt"}
     assert [r.path for r in rg("TODO", str(tmp_path), min_depth=2, max_filesize=5)] == ["sub/small.txt"]
 
 
@@ -361,13 +361,13 @@ def test_backreferences_and_lookaround(tmp_path):
     assert compile(r"(?<=é )é(?=,)").finditer(text) == [(10, 12)]
     assert compile(r"(?=.)").finditer("éλ") == [(0, 0), (2, 2)]
     assert [r.matches for r in rgstr(r"(?=$)", "é\n")] == [[(2, 2)]]
-    assert [p.name for p in fd(tmp_path, r"^(\w+)_\1\.txt$")] == ["echo_echo.txt"]
-    assert fd(tmp_path, path_re=r"(?<=echo_)echo") == [p]
-    assert fd(tmp_path, skip_path_re=r"(?<=echo_)echo") == []
+    assert [p.name for p in fd(r"^(\w+)_\1\.txt$", tmp_path)] == ["echo_echo.txt"]
+    assert fd(root=tmp_path, path_re=r"(?<=echo_)echo") == [p]
+    assert fd(root=tmp_path, skip_path_re=r"(?<=echo_)echo") == []
     sub = tmp_path/"skip_skip"
     sub.mkdir()
     (sub/"a.txt").write_text("foo foo")
-    assert fd(tmp_path, skip_dir_re=r"^(\w+)_\1$") == [p]
+    assert fd(root=tmp_path, skip_dir_re=r"^(\w+)_\1$") == [p]
 
 
 def test_line_local_regexes_and_smart_case():
@@ -388,12 +388,14 @@ def test_line_local_regexes_and_smart_case():
 
 
 def test_regex_runtime_errors(tmp_path):
+    assert [r.matches for r in rgstr(r"\bfoo\b", "x"*5_000_000 + " foo")] == [[(5_000_001, 5_000_004)]]  # long line, hard pattern
+    assert len(rgstr(r"\b(alpha|beta|gamma|delta|epsilon|zeta|eta|theta)\b", "qwerty uiop asdf\n"*400_000 + "beta")) == 1  # many lines, one budget each
     pattern, text = r"(a|b|ab)*(?>c)", "ab"*26
     p = tmp_path/text
     p.mkdir()
     (tmp_path/(text+".txt")).write_text(text)
     for search in [lambda: compile(pattern).is_match(text), lambda: rgstr(pattern, text),
-                   lambda: fd(tmp_path, pattern), lambda: fd(tmp_path, path_re=pattern), lambda: fd(tmp_path, skip_dir_re=pattern)]:
+                   lambda: fd(pattern, tmp_path), lambda: fd(root=tmp_path, path_re=pattern), lambda: fd(root=tmp_path, skip_dir_re=pattern)]:
         with pytest.raises(ValueError, match="backtrack"): search()
 
 
@@ -487,7 +489,7 @@ def test_file_as_root_searches_just_that_file(tmp_path):
     assert rg("TODO", af, paths=True) == [af]
     assert rg("TODO", af, count=True) == 2
     assert list(rg_iter("TODO", af)) == rg("TODO", af)
-    assert fd(af) == [af]
+    assert fd(root=af) == [af]
     # explicit file is searched even when gitignored
     (tmp_path / ".gitignore").write_text("a.txt\n")
     assert rg("TODO", af, paths=True) == [af]
@@ -550,6 +552,7 @@ def test_max_results_and_count(tmp_path):
     res = rg("TODO", str(tmp_path), max_results=2)
     assert [r.kind for r in res] == ["match", "match"]
     assert len(rg("TODO", str(tmp_path))) == 3
+    assert rg("TODO", str(tmp_path), count="file") == {"src/app.py": 1, "src/more.py": 2}
     # context lines ride along with kept matches only
     ctx = rg("TODO", str(tmp_path), context=1, max_results=1)
     assert [r.kind for r in ctx].count("match") == 1
@@ -575,12 +578,11 @@ def test_max_results_and_count(tmp_path):
 def test_pathresults_and_stop_reason(tmp_path):
     make_tree(tmp_path)
     (tmp_path / "more.py").write_text("TODO one\nTODO two\n")
-    found = fd(tmp_path)
+    found = fd(root=tmp_path)
     assert type(found) is PathResults and isinstance(found, list)
     assert found.complete and found.stop_reason is None
     assert str(found) == "\n".join(p.relative_to(tmp_path).as_posix() for p in found)
     assert found[:1].root == found.root and list(found[:1]) == [found[0]]
-    assert type(walk(tmp_path)) is PathResults
     assert type(rg("TODO", tmp_path, paths=True)) is PathResults
 
     full = rg("TODO", tmp_path)
@@ -597,12 +599,11 @@ def test_pathresults_and_stop_reason(tmp_path):
     assert ps.complete and sorted(ps) == sorted(rg("TODO", tmp_path, paths=True))
     with pytest.raises(AssertionError): rg("TODO", tmp_path, count=True, timeout_ms=1)
 
-    timed = fd(tmp_path, timeout_ms=10_000)
+    timed = fd(root=tmp_path, timeout_ms=10_000)
     assert timed.complete and sorted(timed) == sorted(found)
-    assert fd(tmp_path, timeout_ms=0).stop_reason == "timeout"
-    assert walk(tmp_path, timeout_ms=0).stop_reason == "timeout"
+    assert fd(root=tmp_path, timeout_ms=0).stop_reason == "timeout"
 
-    stream = fd_iter(tmp_path)
+    stream = fd_iter(root=tmp_path)
     assert iter(stream) is stream
     got = sorted(stream)
     assert got == sorted(found) and got[0].stat().st_mtime > 0
@@ -649,12 +650,11 @@ def test_paths_and_ls(tmp_path):
     import rgapi
     from rgapi import ls
     make_tree(tmp_path)
-    found = fd(tmp_path)
+    found = fd(root=tmp_path)
     e = next(p for p in found if p.name == "app.py")
     assert isinstance(e, Path) and e.is_absolute()
     st = e.stat()
     assert e.read_text() == "alpha\nTODO here\nomega\n"
-    assert isinstance(walk(tmp_path)[0], Path)
     assert isinstance(rg("TODO", tmp_path, paths=True)[0], Path)
 
     r = repr(found)                                           # long format by default
@@ -691,7 +691,7 @@ def test_list_roots(tmp_path):
     assert labels(rg("TODO", [src/"app.py", tests], ext="py")) == ["src/app.py", "tests/t.py"]
     assert labels(rg("TODO", [src, tests], path_re="^src/", skip_dir="deep")) == ["src/app.py"]
     assert rg("TODO", [tmp_path, src, src], count=True) == rg("TODO", tmp_path, count=True)
-    found = fd([src, tests])
+    found = fd(root=[src, tests])
     assert set(found) == set(rg("TODO", [src, tests], paths=True)) == {src/"app.py", src/"deep/x.py", tests/"n.ipynb", tests/"t.py"}
     assert "tests/t.py" in str(found)
     assert [c.path for c in nbrg("TODO", [src, tests])] == ["tests/n.ipynb"]
@@ -712,11 +712,11 @@ def test_file_root_ignores_siblings_and_depth_cap_permissions(tmp_path):
     try:
         assert [r.path for r in rg("x", f)] == ["f.txt"]          # sibling perms irrelevant to file root
         assert [r.path for r in rg("x", hid)] == [".hid.txt"]     # hidden+ignored file root still searched
-        assert list(fd(f)) == [f]
-        assert fd(f)[0].stat().st_size == 8
+        assert list(fd(root=f)) == [f]
+        assert fd(root=f)[0].stat().st_size == 8
         got = sorted({r.path for r in rg("x", tmp_path, max_depth=1, ignore=False, hidden=True)})
         assert got == [".gitignore", ".hid.txt", "f.txt"]                       # depth-cap dir skipped silently
-        assert list(fd(tmp_path, max_depth=1, ignore=False)) == [f]
+        assert list(fd(root=tmp_path, max_depth=1, ignore=False)) == [f]
         with pytest.raises(ValueError, match="ermission"):
             rg("x", tmp_path)                                     # uncapped: unreadable dir in tree is fatal
         with pytest.raises(ValueError, match="ermission"):
@@ -727,11 +727,11 @@ def test_symlink_link_target_and_show_target(tmp_path):
     (tmp_path / "real").mkdir()
     (tmp_path / "f.txt").write_text("x\n")
     (tmp_path / "lnk").symlink_to("real")
-    found = fd(tmp_path, files=True, dirs=True, show_target=True)
+    found = fd(root=tmp_path, files=True, dirs=True, show_target=True)
     link = next(p for p in found if p.name == "lnk")
     assert link.readlink() == Path("real") and link.is_symlink()
     assert "lnk -> real" in repr(found)
-    assert "->" not in repr(fd(tmp_path, files=True, dirs=True))
+    assert "->" not in repr(fd(root=tmp_path, files=True, dirs=True))
 
 
 def test_nbrg_multiline(tmp_path):

@@ -11,7 +11,7 @@ For common file discovery and search:
 ```python
 from rgapi import fd, ls, rg, rg_iter
 
-fd(".", ext="py", exclude="test_*.py")
+fd(ext="py", exclude="test_*.py")
 ls("src")
 for row in rg_iter("TODO", ".", include="*.py", context=2): print(row.asdict())
 rg("TODO", ".", ext="py", skip_dir=".venv", paths=True)
@@ -35,16 +35,15 @@ await rga("TODO", ".", ext="py", timeout_ms=200)
 async for row in rga_iter("TODO", "."): print(row)
 ```
 
-Use the lower-level functions to compile a regex, search text or a single file, or walk a directory:
+Use the lower-level functions to compile a regex, or to search text or a single file:
 
 ```python
-from rgapi import compile, search_path, search_text, walk
+from rgapi import compile, search_path, search_text
 
 matcher = compile("TODO")
 matcher.is_match("TODO")
 matcher.finditer("TODO TODO")
 
-walk(".")
 search_text(matcher, "alpha\nTODO\nomega\n", path="memory.txt", context=1)
 search_path(matcher, "src/lib.rs", display_path="src/lib.rs")
 ```
@@ -57,7 +56,7 @@ pip install rgapi
 
 ## File discovery
 
-`fd` and `walk` return absolute `pathlib.Path` objects. Use them directly with `.read_text()`, `.open()`, `.stat()`, or other filesystem operations. Their collected results display names relative to `root`. Pass `root` as a `str` or `Path`, or as a list of them. The sync and async APIs expand `~` and accept `.`, `./`, and paths containing `..`.
+`fd` returns absolute `pathlib.Path` objects. Use them directly with `.read_text()`, `.open()`, `.stat()`, or other filesystem operations. Its collected results display names relative to `root`. Pass `root` as a `str` or `Path`, or as a list of them. The sync and async APIs expand `~` and accept `.`, `./`, and paths containing `..`.
 
 A list of roots, such as `rg("TODO", ["src", "tests"])`, works with every walk and search function. The roots are searched as one walk that returns one result list. `timeout_ms` and `max_results` apply to the whole walk. Result paths are relative to the common ancestor of the roots. For example, rows read `src/app.py` and `tests/test_app.py`. `PathResults` displays use the same relative paths. Filters such as `include`, `path_re` and `skip_dir` match these relative paths. A file under more than one root, such as `src/app.py` with roots `[".", "src"]`, appears once.
 
@@ -67,7 +66,7 @@ Hidden files are skipped unless `hidden=True`. Discovery returns symlinks themse
 
 Traversal runs in parallel without guaranteed result order. Use `sorted(...)` when order matters.
 
-`fd` adds filename filters to `walk`. Its `pattern` is a smart-case regex matched against each basename. Lowercase patterns match case-insensitively. A pattern containing uppercase letters is case-sensitive. Use `path_re` to match the slash-separated relative path instead.
+`fd` takes `pattern` first and `root` second, as `rg` does. With no pattern, it returns every file under `root`. `pattern` is a smart-case regex matched against each basename. Lowercase patterns match case-insensitively. A pattern containing uppercase letters is case-sensitive. Use `path_re` to match the slash-separated relative path instead.
 
 `include` and `exclude` use case-sensitive glob syntax. `glob=` is an alias for `include=`. Patterns without `/` match names at any depth, so `*.py` matches `src/app.py`. Patterns containing `/` are root-relative. `*` stays within a path component; `**` spans directories: `src/*` matches immediate children, whereas `src/**` also matches deeper descendants. Matching a directory with `exclude` prunes its entire subtree. Includes never prune traversal. Excludes always win, and includes do not override ignore rules.
 
@@ -75,7 +74,7 @@ Filter extensions with `ext="py"` or `ext=["py", "rs"]`. Extension and glob filt
 
 Set `min_depth` and `max_depth` to bound recursion. `max_filesize` skips files above a byte limit.
 
-`ls` follows the shell command's listing conventions. It uses `fd` with `max_depth=1`, includes directories, disables ignore rules, and sorts by name. Set `hidden=True` for `ls -a` behaviour. All `fd` filters remain available.
+`ls` follows the shell command's listing conventions. It takes `root` first, as the shell's `ls DIR` does. It uses `fd` with `max_depth=1`, includes directories, disables ignore rules, and sorts by name. Set `hidden=True` for `ls -a` behaviour. All `fd` filters remain available.
 
 `fd_iter` yields absolute `Path` objects as the walk finds them. It accepts every `fd` filter. Stopping iteration ends the walk. It does not accept `timeout_ms`.
 
@@ -92,10 +91,10 @@ Patterns support backreferences and lookaround everywhere, including filename an
 ```python
 rg(r"\b(\w+)\s+\1\b", ".")  # repeated words
 rg(r"(?<=TODO: )\w+", ".")   # word following TODO:
-fd(".", pattern=r"^(\w+)_\1\.py$")  # names such as utils_utils.py
+fd(r"^(\w+)_\1\.py$")  # names such as utils_utils.py
 ```
 
-All regex parameters use `fancy-regex`; no engine-selection flag or C library is required. Ordinary patterns use its non-backtracking engine. Patterns requiring backtracking have a bounded backtracking budget; exceeding it raises `ValueError`, rather than silently skipping a file or path.
+All regex parameters use `fancy-regex`, with no engine-selection flag and no C library. Ordinary patterns, including word boundaries (`\b`, `\B`) outside lookbehinds, use its non-backtracking engine. Patterns requiring backtracking have a step budget that allows lines of millions of characters. A search that exceeds the budget raises `ValueError`. It never silently skips a file or path.
 
 Each `SearchLine` has these fields:
 
@@ -114,7 +113,7 @@ matches      list of (start, end) byte offsets for match rows
 
 Pass `lnhashs=True` to `rg` or `rg_iter` to display hash addresses instead of line numbers. The `line_number` field remains available.
 
-For other result forms, use `rg(..., paths=True)` to return unique matched paths or `rg(..., count=True)` to count match spans. `paths` and `count` cannot both be set.
+For other result forms, use `rg(..., paths=True)` to return unique matched paths, `rg(..., count=True)` to count match spans, or `rg(..., count="file")` for a dict from each file's label to its count, sorted by label. `paths` and `count` cannot both be set.
 
 `^` and `$` match at the start and end of each line. A line ends at `\n` or `\r\n`. `$` also matches before a `\r` that has no `\n` after it. `rg`, `rgstr`, and `compile` reject patterns containing a literal `\n` or `\r`. `nbrg` allows them with `multiline=True`.
 
@@ -122,10 +121,10 @@ Content searches and compiled content matchers are confined to individual lines:
 
 ### Path results
 
-`fd`, `walk`, and `ls` return `PathResults`, a list of absolute `Path` objects. So do `rg` and `nbrg` with `paths=True`, and their async equivalents. Indexing or iterating returns ordinary Paths:
+`fd` and `ls` return `PathResults`, a list of absolute `Path` objects. So do `rg` and `nbrg` with `paths=True`, and their async equivalents. Indexing or iterating returns ordinary Paths:
 
 ```python
-for path in fd("src", ext="py"):
+for path in fd(root="src", ext="py"):
     text = path.read_text()
     size = path.stat().st_size
 ```
@@ -142,13 +141,13 @@ Rust callers can set `FindOptions::special_files` to also discover FIFOs, socket
 
 ### Limits and timeouts
 
-Set `timeout_ms` on `rg`, `fd`, `walk`, or `ls` to stop at a deadline and return the results collected so far. Their async versions accept it too. Results report why the operation stopped:
+Set `timeout_ms` on `rg`, `fd` or `ls` to stop at a deadline and return the results collected so far. Their async versions accept it too. Results report why the operation stopped:
 
 - `stop_reason=None` means the result is complete.
 - `stop_reason="max_results"` means `max_results` truncated the result.
 - `stop_reason="timeout"` means the deadline was reached.
 
-`complete` is true exactly when `stop_reason` is `None`. `count=True` returns a plain integer without a completion flag. It cannot be combined with `timeout_ms`.
+`complete` is true exactly when `stop_reason` is `None`. A count is a plain integer or dict, with no completion flag. Counting can't be combined with `timeout_ms`.
 
 Deadlines stop result collection and request worker cancellation. Workers cannot interrupt a regex evaluation or filesystem call already in progress; a timeout is not a hard per-match execution limit.
 
@@ -235,7 +234,7 @@ Run `rgapi-nbrg --help` for its discovery, matching, and output options.
 ```python
 from rgapi import fda, rga, rga_iter
 
-await fda(".", ext="py")
+await fda(ext="py")
 res = await rga("TODO", ".", timeout_ms=200)
 if not res.complete: print(f"partial results: {res.stop_reason}")
 async for row in rga_iter("TODO", "."): ...

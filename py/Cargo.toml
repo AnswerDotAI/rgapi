@@ -11,7 +11,7 @@ test = false
 [dependencies]
 rgapi = { path = ".." }
 grep-matcher.workspace = true
-pyo3 = { version = ">=0.29", features = ["extension-module"] }
+pyo3 = { version = ">=0.30", features = ["extension-module"] }
 
 [build-dependencies]
 pyo3-build-config = ">=0.29"

@@ -95,29 +95,6 @@ def _context(context, before_context, after_context):
     return before_context, after_context
 
 
-def walk(
-    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
-    hidden:bool=False, # Include hidden files and directories
-    ignore:bool=True, # Respect `.gitignore` and other ignore files
-    max_depth:int|None=None, # Maximum directory depth to descend
-    min_depth:int|None=None, # Minimum depth for returned paths
-    max_filesize:int|None=None, # Skip files larger than this many bytes
-    follow_links:bool=False, # Follow symbolic links while walking
-    same_file_system:bool=False, # Do not cross filesystem boundaries
-    path_re:str|None=None, # Regex that returned relative paths must match
-    skip_path_re:str|None=None, # Regex for relative paths to skip
-    skip_dir:str|list|None=None, # Directory glob or globs to prune
-    skip_dir_re:str|None=None, # Directory regex used to prune traversal
-    files:bool=True, # Include files in results
-    dirs:bool=False, # Include directories in results
-    timeout_ms:int|None=None, # Cancel the walk after this long and return partial results
-) -> PathResults:
-    "Walk a directory and return absolute file and/or directory Paths."
-    return _find(root, None, files, dirs, timeout_ms, hidden=hidden, ignore=ignore, max_depth=max_depth, min_depth=min_depth,
-        max_filesize=max_filesize, follow_links=follow_links, same_file_system=same_file_system, path_re=path_re, skip_path_re=skip_path_re,
-        skip_dir=skip_dir, skip_dir_re=skip_dir_re)
-
-
 def _walk_args(
     glob:str|list|None=None, # Include glob or globs; alias for `include`
     include:str|list|None=None, # Include glob or globs, e.g. `*.py`
@@ -154,8 +131,8 @@ def _find(root, pattern=None, files=True, dirs=False, timeout_ms=None, show_targ
 
 @delegates(_walk_args)
 def fd(
-    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
+    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
     show_target:bool=False, # Append `-> target` to symlink rows in the display
@@ -170,8 +147,8 @@ def fd(
 
 @delegates(_walk_args)
 def fd_iter(
-    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
+    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
     **kwargs
@@ -216,12 +193,12 @@ async def _acall(fn, *args):
 
 @delegates(fd)
 async def fda(
-    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
+    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
-    timeout_ms:int|None=None, # Cancel the walk after this long and return partial results
     show_target:bool=False, # Append `-> target` to symlink rows in the display
+    timeout_ms:int|None=None, # Cancel the walk after this long and return partial results
     **kwargs
 ) -> PathResults:
     "Async `fd`: find paths on Rust threads without blocking the event loop."
@@ -232,8 +209,8 @@ async def fda(
 
 @delegates(_walk_args)
 async def fda_iter(
-    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     pattern:str|None=None, # Smart-case regex matched against each basename
+    root:str|Path|list=".", # Directory or file to walk, or a list of them (expands `~`)
     files:bool=True, # Include files in results
     dirs:bool=False, # Include directories in results
     batch_max:int=512, # Largest batch of paths delivered to the event loop at once
@@ -283,9 +260,26 @@ def _paths_reduce(rows, w, max_results, timed_out=False):
         res.append(row.path)
     return _mk_results(PathResults, res, capped, timed_out, root=_core.walk_base(w, True, False))
 
+def _rg_checks(paths, count, max_results, timeout_ms, summary):
+    "Reject `rg`/`rga` result options that can't combine"
+    assert count in (False, True, "file"), "count is True, False or 'file'"
+    assert not (paths and count), "paths and count are mutually exclusive"
+    assert not (count and max_results), "count and max_results are mutually exclusive"
+    assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
+    assert not (summary and count), "summary and count are mutually exclusive"
+    assert not (summary and paths), "summary and paths are mutually exclusive"
+
+def _counted(rows, count):
+    "The total of `rows`' match spans, or for `count='file'` a dict from each file's label to its total, sorted by label"
+    if count != "file": return sum(len(r.matches) for r in rows if r.kind == "match")
+    res = {}
+    for r in rows:
+        if r.kind == "match": res[r.path] = res.get(r.path, 0) + len(r.matches)
+    return dict(sorted(res.items()))
+
 def _rg_post(rows, paths, count, max_results, timed_out, w):
     "Reduce collected rows to the requested `rg`/`rga` result form"
-    if count: return sum(len(r.matches) for r in rows if r.kind == "match")
+    if count: return _counted(rows, count)
     if not paths: return _mk_results(SearchResults, *_cap_rows(rows, max_results), timed_out)
     return _paths_reduce(rows, w, max_results, timed_out)
 
@@ -301,7 +295,7 @@ def rg(
     after_context:int=0, # Lines of context after each match, like `rg -A`
     context:int=0, # Sets both before and after context, like `rg -C`
     paths:bool=False, # Return unique matched paths instead of rows
-    count:bool=False, # Return total match span count instead of rows
+    count:bool|str=False, # Return the total match span count, or with `"file"` a dict of each file's count, instead of rows
     max_results:int|None=None, # Stop after this many matching rows; context rows of kept matches are included
     lnhashs:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
@@ -309,7 +303,7 @@ def rg(
     maxlen:int=MAXLEN, # Maximum source characters per displayed block
     **kwargs
 ):
-    """Search files and return `SearchResults`, matched paths, or a count; `lnhashs=True` shows exhash-style addresses.
+    """Search files and return `SearchResults`, matched paths, or match counts; `lnhashs=True` shows exhash-style addresses.
 
     Patterns support backreferences and lookaround, confined to individual lines. Compilation or backtracking-limit failures
     raise `ValueError`. Timeouts request cancellation but do not interrupt a regex evaluation already in progress.
@@ -319,18 +313,14 @@ def rg(
     each block's boundary addresses. `^` and `$` anchor each line, and a line ends at LF or CRLF. Patterns containing a newline or
     carriage return are rejected. Row `path` fields are labels relative to the root, or to the common ancestor of several roots.
     Each row has `asdict()`. A symlink named as `root` is followed."""
-    assert not (paths and count), "paths and count are mutually exclusive"
-    assert not (count and max_results), "count and max_results are mutually exclusive"
-    assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
-    assert not (summary and count), "summary and count are mutually exclusive"
-    assert not (summary and paths), "summary and paths are mutually exclusive"
+    _rg_checks(paths, count, max_results, timeout_ms, summary)
     before_context, after_context = _context(context, before_context, after_context)
     w = _walk(root, **kwargs)
     args = (w, pattern, case_sensitive, smart_case, before_context, after_context)
     if summary:
         rows,timed_out = _core.block_search(*args, timeout_ms)
         return _block_post(rows, max_results, before_context, after_context, timed_out, maxlen, lnhashs)
-    if count: return sum(len(row.matches) for row in _core.rg_iter(*args, False) if row.kind == "match")
+    if count: return _counted(_core.rg_iter(*args, False), count)
     if paths and timeout_ms is None: return _paths_reduce(_core.rg_iter(*args, False), w, max_results)
     rows, timed_out = _core.rg(*args, lnhashs, timeout_ms)
     return _rg_post(rows, paths, False, max_results, timed_out, w)
@@ -363,7 +353,7 @@ async def rga(
     after_context:int=0, # Lines of context after each match, like `rg -A`
     context:int=0, # Sets both before and after context, like `rg -C`
     paths:bool=False, # Return unique matched paths instead of rows
-    count:bool=False, # Return total match span count instead of rows
+    count:bool|str=False, # Return the total match span count, or with `"file"` a dict of each file's count, instead of rows
     max_results:int|None=None, # Stop after this many matching rows; context rows of kept matches are included
     lnhashs:bool=False, # Show `lineno|hash|` addresses instead of line numbers in row display
     timeout_ms:int|None=None, # Cancel the search after this long and return partial results
@@ -372,11 +362,7 @@ async def rga(
     **kwargs
 ):
     "Async `rg`: search on Rust threads without blocking the event loop."
-    assert not (paths and count), "paths and count are mutually exclusive"
-    assert not (count and max_results), "count and max_results are mutually exclusive"
-    assert not (count and timeout_ms is not None), "count and timeout_ms are mutually exclusive"
-    assert not (summary and count), "summary and count are mutually exclusive"
-    assert not (summary and paths), "summary and paths are mutually exclusive"
+    _rg_checks(paths, count, max_results, timeout_ms, summary)
     before_context, after_context = _context(context, before_context, after_context)
     w = _walk(root, **kwargs)
     args = (w, pattern, case_sensitive, smart_case, before_context, after_context)

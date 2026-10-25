@@ -18,12 +18,13 @@ def _more(tmp_path):
 
 def test_async_results_match_sync(tmp_path):
     _more(tmp_path)
-    found = run_sync(fda(tmp_path))
-    assert type(found) is PathResults and isinstance(found[0], Path) and sorted(found) == sorted(fd(tmp_path))
-    assert sorted(run_sync(fda(tmp_path, glob="*.py"))) == sorted(fd(tmp_path, glob="*.py"))
-    assert run_sync(fda(tmp_path, timeout_ms=0)).stop_reason == "timeout"
+    found = run_sync(fda(root=tmp_path))
+    assert type(found) is PathResults and isinstance(found[0], Path) and sorted(found) == sorted(fd(root=tmp_path))
+    assert sorted(run_sync(fda(root=tmp_path, glob="*.py"))) == sorted(fd(root=tmp_path, glob="*.py"))
+    assert run_sync(fda(root=tmp_path, timeout_ms=0)).stop_reason == "timeout"
     assert srt(run_sync(rga("TODO", tmp_path))) == srt(rg("TODO", tmp_path))
     assert run_sync(rga("TODO", tmp_path, count=True)) == rg("TODO", tmp_path, count=True)
+    assert run_sync(rga("TODO", tmp_path, count="file")) == rg("TODO", tmp_path, count="file")
     assert sorted(run_sync(rga("TODO", tmp_path, paths=True))) == sorted(rg("TODO", tmp_path, paths=True))
     assert run_sync(rga("TODO", tmp_path, max_results=1)).stop_reason == "max_results"
     assert run_sync(rga("TODO", tmp_path, timeout_ms=0)).stop_reason == "timeout"
@@ -40,7 +41,7 @@ def test_async_dot_root(tmp_path, monkeypatch):
     _more(tmp_path)
     _nb_tree(tmp_path)
     monkeypatch.chdir(tmp_path)
-    assert sorted(run_sync(fda(".", ext="py"))) == sorted(fd(".", ext="py"))
+    assert sorted(run_sync(fda(ext="py"))) == sorted(fd(ext="py"))
     assert srt(run_sync(rga("TODO", "."))) == srt(rg("TODO", "."))
     async def rg_rows(): return [r async for r in rga_iter("TODO", ".")]
     assert srt(run_sync(rg_rows())) == srt(rg("TODO", "."))
@@ -63,13 +64,13 @@ def test_rga_iter(tmp_path):
 
 def test_fda_iter(tmp_path):
     _more(tmp_path)
-    async def all_paths(): return [p async for p in fda_iter(tmp_path)]
+    async def all_paths(): return [p async for p in fda_iter(root=tmp_path)]
     got = sorted(run_sync(all_paths()))
-    assert got == sorted(fd(tmp_path)) and isinstance(got[0], Path)
+    assert got == sorted(fd(root=tmp_path)) and isinstance(got[0], Path)
     async def first_then_close():
-        async with aclosing(fda_iter(tmp_path)) as it:
+        async with aclosing(fda_iter(root=tmp_path)) as it:
             async for p in it: return p
-    assert run_sync(first_then_close()) in fd(tmp_path)
+    assert run_sync(first_then_close()) in fd(root=tmp_path)
 
 
 def test_async_pruning_regex_errors(tmp_path):
@@ -77,7 +78,7 @@ def test_async_pruning_regex_errors(tmp_path):
     sub.mkdir()
     (sub/"a.txt").write_text("TODO")
     pattern = r"(a|b|ab)*(?>c)"
-    with pytest.raises(ValueError, match="backtrack"): run_sync(fda(tmp_path, skip_dir_re=pattern))
+    with pytest.raises(ValueError, match="backtrack"): run_sync(fda(root=tmp_path, skip_dir_re=pattern))
     async def rows(): return [r async for r in rga_iter("TODO", tmp_path, skip_dir_re=pattern)]
     with pytest.raises(ValueError, match="backtrack"): run_sync(rows())
 
