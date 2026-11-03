@@ -1,3 +1,4 @@
+use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::atomic::Ordering;
@@ -8,10 +9,9 @@ use fancy_regex::Regex;
 use ignore::{DirEntry, WalkState};
 use serde::Deserialize;
 
-use crate::RgApiError;
-use crate::compile_regex;
 use crate::search::{SearchLine, search_text};
 use crate::walk::{PathFilters, StreamIter, WalkOptions, entry_err, rel_path, resolve_roots, spawn_walk};
+use crate::{RgApiError, compile_regex};
 
 static HEADING_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#{1,6} \w").unwrap());
 
@@ -56,8 +56,8 @@ fn tool_names(text: &str) -> Vec<String> {
 }
 
 /// nbformat multiline text, a string or a list of strings, as one string.
-fn nb_text(v: &serde_json::Value) -> String {
-    match v { serde_json::Value::String(s) => s.clone(), serde_json::Value::Array(a) => a.iter().filter_map(|o| o.as_str()).collect(), _ => String::new() }
+fn nb_text(v: &Value) -> String {
+    match v { Value::String(s) => s.clone(), Value::Array(a) => a.iter().filter_map(|o| o.as_str()).collect(), _ => String::new() }
 }
 
 /// The sigil references in one notebook cell, in order of appearance.
@@ -75,7 +75,7 @@ pub struct CellRefs {
 /// `vars` and `cmds` come from a prompt cell's source. `tools` comes from the source of a prompt or Markdown cell.
 /// For every other cell, `tools` comes from the `text/markdown` data of its `display_data` and `execute_result` outputs.
 /// A prompt cell's outputs are never read.
-pub fn cell_refs(cell: &serde_json::Value) -> CellRefs {
+pub fn cell_refs(cell: &Value) -> CellRefs {
     let src = nb_text(&cell["source"]);
     let prompt = cell["metadata"]["solveit_ai"] == true;
     let mut res = CellRefs::default();
@@ -109,12 +109,10 @@ pub struct NbCell {
 struct RawNb { #[serde(default)] cells: Vec<RawCell> }
 
 #[derive(Deserialize)]
-struct RawCell { #[serde(default)] id: Option<serde_json::Value>, #[serde(default)] cell_type: Option<String>, #[serde(default)] source: Source }
+struct RawCell { #[serde(default)] id: Option<Value>, #[serde(default)] cell_type: Option<String>, #[serde(default)] source: Source }
 
 impl RawCell {
-    fn id_string(&self, index: usize) -> String {
-        match &self.id { Some(serde_json::Value::String(s)) => s.clone(), Some(v) => v.to_string(), None => index.to_string() }
-    }
+    fn id_string(&self, index: usize) -> String { match &self.id { Some(Value::String(s)) => s.clone(), Some(v) => v.to_string(), None => index.to_string() } }
 }
 
 // nbformat `source` is a list of lines or a single string (or absent/null).

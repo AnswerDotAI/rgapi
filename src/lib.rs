@@ -1,5 +1,6 @@
 //! rgapi - Python-friendly wrappers around ripgrep's walking and searching crates.
 
+use std::fmt::Display;
 mod block;
 mod matcher;
 mod nb;
@@ -17,7 +18,7 @@ pub struct RgApiError { msg: String }
 
 impl RgApiError { pub(crate) fn new(msg: impl Into<String>) -> Self { Self { msg: msg.into() } } }
 
-impl std::fmt::Display for RgApiError { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.msg) } }
+impl Display for RgApiError { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.msg) } }
 
 impl std::error::Error for RgApiError {}
 

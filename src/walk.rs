@@ -1,8 +1,10 @@
+use mpsc::{RecvTimeoutError, SyncSender};
 use std::collections::HashSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
+use std::time::{Duration, Instant};
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use grep_matcher::Matcher;
@@ -108,19 +110,19 @@ impl<T> StreamIter<T> {
         Ok(())
     }
 
-    pub fn next_timeout(&mut self, timeout: std::time::Duration) -> Result<Result<T, RgApiError>, mpsc::RecvTimeoutError> { self.rx.recv_timeout(timeout) }
+    pub fn next_timeout(&mut self, timeout: Duration) -> Result<Result<T, RgApiError>, RecvTimeoutError> { self.rx.recv_timeout(timeout) }
 
     /// Collect all items, stopping at `timeout_ms`; the bool is true when the deadline stopped it.
     pub fn collect_timeout(mut self, timeout_ms: Option<u64>) -> Result<(Vec<T>, bool), RgApiError> {
         let Some(ms) = timeout_ms else { return Ok((self.collect::<Result<Vec<_>, _>>()?, false)); };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+        let deadline = Instant::now() + Duration::from_millis(ms);
         let mut res = Vec::new();
         loop {
-            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() { return Ok((res, true)); }
             match self.next_timeout(left) {
-                Ok(Ok(item)) => res.push(item), Ok(Err(err)) => return Err(err), Err(mpsc::RecvTimeoutError::Disconnected) => return Ok((res, false)),
-                Err(mpsc::RecvTimeoutError::Timeout) => return Ok((res, true))
+                Ok(Ok(item)) => res.push(item), Ok(Err(err)) => return Err(err), Err(RecvTimeoutError::Disconnected) => return Ok((res, false)),
+                Err(RecvTimeoutError::Timeout) => return Ok((res, true))
             }
         }
     }
@@ -161,8 +163,8 @@ mod close_tests {
 }
 
 pub(crate) fn spawn_walk<T, F>(roots: Vec<PathBuf>, base: PathBuf, walk: &WalkOptions, filters: Arc<PathFilters>, ready: Vec<T>, entry: F) -> StreamIter<T>
-where T: Send + 'static, F: Fn(Result<DirEntry, ignore::Error>, &Path, &PathFilters, &mpsc::SyncSender<Result<T, RgApiError>>, &Arc<AtomicBool>) -> WalkState
-        + Send + Sync + Clone + 'static {
+where T: Send + 'static, F: Fn(Result<DirEntry, ignore::Error>, &Path, &PathFilters, &SyncSender<Result<T, RgApiError>>, &Arc<AtomicBool>) -> WalkState + Send
+        + Sync + Clone + 'static {
     let cancel = Arc::new(AtomicBool::new(false));
     let worker_cancel = cancel.clone();
     let (tx, rx) = mpsc::sync_channel(8192);
@@ -287,7 +289,7 @@ fn configure_walker(walker: &mut WalkBuilder, root: &Path, walk: &WalkOptions) {
 }
 
 fn filter_dirs<T: Send + 'static>(
-    walker: &mut WalkBuilder, base: &Path, filters: Arc<PathFilters>, tx: mpsc::SyncSender<Result<T, RgApiError>>, cancel: Arc<AtomicBool>) {
+    walker: &mut WalkBuilder, base: &Path, filters: Arc<PathFilters>, tx: SyncSender<Result<T, RgApiError>>, cancel: Arc<AtomicBool>) {
     let base = base.to_path_buf();
     walker.filter_entry(move |entry| {
         if cancel.load(Ordering::Relaxed) { false } else {
@@ -350,6 +352,7 @@ fn re_match(matcher: &RegexMatcher, rel: &str) -> Result<bool, RgApiError> { mat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn globs_match_names_or_root_relative_components() {
@@ -367,7 +370,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
         let worker = std::thread::spawn(move || {
-            for i in items { std::thread::sleep(std::time::Duration::from_millis(delay_ms)); if tx.send(Ok(i)).is_err() { return; } }
+            for i in items { std::thread::sleep(Duration::from_millis(delay_ms)); if tx.send(Ok(i)).is_err() { return; } }
         });
         StreamIter { rx, cancel, worker: Some(worker) }
     }

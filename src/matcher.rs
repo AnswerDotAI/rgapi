@@ -1,6 +1,8 @@
+use ast::ClassSetItem;
 use fancy_regex::{Assertion, Expr, Regex, RegexBuilder};
 use grep_matcher::{LineTerminator, Match, Matcher, NoCaptures};
 use regex_syntax::{ast::{self, Ast, Visitor}, hir::{Class, Hir, HirKind}};
+use std::fmt::Display;
 
 use crate::RgApiError;
 
@@ -68,7 +70,7 @@ pub fn compile_regex(pattern: &str, case_sensitive: Option<bool>, smart_case: bo
     RegexMatcher::build(pattern, case_sensitive, smart_case, !multiline, true)
 }
 
-fn regex_error(error: impl std::fmt::Display) -> RgApiError { RgApiError::new(error.to_string()) }
+fn regex_error(error: impl Display) -> RgApiError { RgApiError::new(error.to_string()) }
 
 impl Matcher for RegexMatcher {
     type Captures = NoCaptures;
@@ -160,10 +162,10 @@ impl Visitor for ClassLiterals {
     type Err = std::convert::Infallible;
     fn finish(self) -> Result<Self, Self::Err> { Ok(self) }
     fn visit_pre(&mut self, ast: &Ast) -> Result<(), Self::Err> { if let Ast::Literal(lit) = ast { self.add(lit.c); } Ok(()) }
-    fn visit_class_set_item_pre(&mut self, item: &ast::ClassSetItem) -> Result<(), Self::Err> {
+    fn visit_class_set_item_pre(&mut self, item: &ClassSetItem) -> Result<(), Self::Err> {
         match item {
-            ast::ClassSetItem::Literal(lit) => self.add(lit.c),
-            ast::ClassSetItem::Range(r) => {
+            ClassSetItem::Literal(lit) => self.add(lit.c),
+            ClassSetItem::Range(r) => {
                 self.add(r.start.c);
                 self.add(r.end.c);
             }

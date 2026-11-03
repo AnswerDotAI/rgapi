@@ -1,3 +1,5 @@
+use grep_searcher::Searcher;
+use std::fmt::Display;
 use std::path::Path;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc::SyncSender};
 
@@ -114,7 +116,7 @@ impl CollectSink<'_> { fn cancelled(&self) -> bool { match &self.cancel { Some(c
 impl Sink for CollectSink<'_> {
     type Error = SearchError;
 
-    fn matched(&mut self, _searcher: &grep_searcher::Searcher, mat: &SinkMatch<'_>) -> Result<bool, Self::Error> {
+    fn matched(&mut self, _searcher: &Searcher, mat: &SinkMatch<'_>) -> Result<bool, Self::Error> {
         if self.cancelled() { return Ok(false); }
         let line = bytes_to_line(mat.bytes())?;
         let line_number = mat.line_number().unwrap_or(0);
@@ -124,7 +126,7 @@ impl Sink for CollectSink<'_> {
         Ok(!self.cancelled())
     }
 
-    fn context(&mut self, _searcher: &grep_searcher::Searcher, ctx: &SinkContext<'_>) -> Result<bool, Self::Error> {
+    fn context(&mut self, _searcher: &Searcher, ctx: &SinkContext<'_>) -> Result<bool, Self::Error> {
         if self.cancelled() { return Ok(false); }
         let kind = match ctx.kind() {
             SinkContextKind::Before => SearchKind::Before, SinkContextKind::After => SearchKind::After, SinkContextKind::Other => SearchKind::Context
@@ -134,19 +136,19 @@ impl Sink for CollectSink<'_> {
         self.lines.push(SearchLine { kind, path: self.path.clone(), line_number, lnhash: format_lnhash(line_number, &line), line, matches: Vec::new() });
         Ok(!self.cancelled())
     }
-    fn binary_data(&mut self, _searcher: &grep_searcher::Searcher, _binary_byte_offset: u64) -> Result<bool, Self::Error> { self.lines.clear(); Ok(false) }
+    fn binary_data(&mut self, _searcher: &Searcher, _binary_byte_offset: u64) -> Result<bool, Self::Error> { self.lines.clear(); Ok(false) }
 }
 
 #[derive(Debug)]
 /// A search failure, including invalid UTF-8 in matched text.
 pub enum SearchError { Message(String), InvalidUtf8 }
-impl std::fmt::Display for SearchError {
+impl Display for SearchError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self { Self::Message(msg) => write!(f, "{msg}"), Self::InvalidUtf8 => write!(f, "invalid utf-8") }
     }
 }
 impl std::error::Error for SearchError {}
-impl SinkError for SearchError { fn error_message<T: std::fmt::Display>(message: T) -> Self { Self::Message(message.to_string()) } }
+impl SinkError for SearchError { fn error_message<T: Display>(message: T) -> Self { Self::Message(message.to_string()) } }
 fn bytes_to_line(bytes: &[u8]) -> Result<String, SearchError> {
     let s = std::str::from_utf8(bytes).map_err(|_| SearchError::InvalidUtf8)?;
     Ok(s.trim_end_matches(['\r', '\n']).to_string())

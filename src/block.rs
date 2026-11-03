@@ -6,10 +6,9 @@ use std::sync::atomic::Ordering;
 use crate::RegexMatcher;
 use ignore::{DirEntry, WalkState};
 
-use crate::RgApiError;
-use crate::compile_regex;
 use crate::search::{RgOptions, SearchLine, format_lnhash, search_text};
 use crate::walk::{PathFilters, StreamIter, entry_err, rel_path, resolve_roots, spawn_walk};
+use crate::{RgApiError, compile_regex};
 
 /// One blank-line-delimited block containing a match, or context for one.
 pub struct SearchBlock {
