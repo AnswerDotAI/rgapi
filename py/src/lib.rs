@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use pyo3::exceptions::PyValueError;
@@ -293,7 +294,7 @@ fn stream_async<T, C>(cb: Py<PyAny>, mut iter: StreamIter<T>, deadline: Option<I
     C: Fn(Python<'_>, Vec<T>, bool) -> PyResult<Py<PyAny>> + Send + 'static {
     let cancel = iter.cancel_flag();
     let flag = cancel.clone();
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         let (rows, timed_out, err) = drain_stream(&mut iter, &flag, deadline);
         drop(iter);
         Python::attach(|py| {
@@ -312,7 +313,7 @@ fn stream_iter_async<T, C>(cb: Py<PyAny>, mut iter: StreamIter<T>, batch_max: us
     C: Fn(Python<'_>, Vec<T>) -> PyResult<Py<PyAny>> + Send + 'static {
     let cancel = iter.cancel_flag();
     let flag = cancel.clone();
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         let mut err: Option<String> = None;
         loop {
             if flag.load(Ordering::Relaxed) { break; }

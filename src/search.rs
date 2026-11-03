@@ -1,6 +1,7 @@
 use grep_searcher::Searcher;
 use std::fmt::Display;
 use std::path::Path;
+use std::str;
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}, mpsc::SyncSender};
 
 use crate::matcher::RegexMatcher;
@@ -150,13 +151,13 @@ impl Display for SearchError {
 impl std::error::Error for SearchError {}
 impl SinkError for SearchError { fn error_message<T: Display>(message: T) -> Self { Self::Message(message.to_string()) } }
 fn bytes_to_line(bytes: &[u8]) -> Result<String, SearchError> {
-    let s = std::str::from_utf8(bytes).map_err(|_| SearchError::InvalidUtf8)?;
+    let s = str::from_utf8(bytes).map_err(|_| SearchError::InvalidUtf8)?;
     Ok(s.trim_end_matches(['\r', '\n']).to_string())
 }
 /// Return byte offsets for every match in a line.
 pub fn spans_for(matcher: &RegexMatcher, bytes: &[u8]) -> Result<Vec<MatchSpan>, SearchError> {
     let mut spans = Vec::new();
-    let text = std::str::from_utf8(bytes).map_err(|_| SearchError::InvalidUtf8)?;
+    let text = str::from_utf8(bytes).map_err(|_| SearchError::InvalidUtf8)?;
     matcher.for_each_match(text, |start, end| spans.push(MatchSpan { start, end })).map_err(|e| SearchError::Message(e.to_string()))?;
     Ok(spans)
 }

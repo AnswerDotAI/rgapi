@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
+use std::fs;
 use std::path::Path;
+use std::str;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -47,7 +49,7 @@ fn split_blocks(text: &str) -> Vec<BlockInfo> {
 
 fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, before_context: usize, after_context: usize) -> Result<Vec<SearchBlock>, RgApiError> {
     if bytes.contains(&0) { return Ok(Vec::new()); }
-    let text = match std::str::from_utf8(bytes) { Ok(text) => text, Err(_) => return Ok(Vec::new()) };
+    let text = match str::from_utf8(bytes) { Ok(text) => text, Err(_) => return Ok(Vec::new()) };
     let blocks = split_blocks(text);
     let hits = search_text(disp.clone(), text, matcher.clone(), 0, 0, false)?;
     if hits.is_empty() { return Ok(Vec::new()); }
@@ -82,7 +84,7 @@ fn block_entry(
     if !ft.is_file() { return Ok(Vec::new()); }
     let rel = rel_path(base, path);
     if !filters.path_allowed(Path::new(&rel))? { return Ok(Vec::new()); }
-    let bytes = match std::fs::read(path) { Ok(bytes) => bytes, Err(_) => return Ok(Vec::new()) };
+    let bytes = match fs::read(path) { Ok(bytes) => bytes, Err(_) => return Ok(Vec::new()) };
     process_file(rel, &bytes, matcher, before_context, after_context)
 }
 

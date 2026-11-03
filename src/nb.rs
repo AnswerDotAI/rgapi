@@ -1,5 +1,6 @@
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
+use std::fs;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock};
@@ -156,7 +157,7 @@ pub fn nb_search_file(
     path: &Path, display_path: String, pattern: &str, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool
 ) -> Result<Vec<NbCell>, RgApiError> {
     let matcher = compile_regex(pattern, case_sensitive, smart_case, multiline)?;
-    let bytes = match std::fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
+    let bytes = match fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
     process_file(display_path, &bytes, &matcher, cell_context, multiline)
 }
 
@@ -169,7 +170,7 @@ fn nb_entry(
     if !ft.is_file() { return Ok(Vec::new()); }
     let rel = rel_path(base, path);
     if !filters.path_allowed(Path::new(&rel))? { return Ok(Vec::new()); }
-    let bytes = match std::fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
+    let bytes = match fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
     process_file(rel, &bytes, matcher, cell_context, multiline)
 }
 

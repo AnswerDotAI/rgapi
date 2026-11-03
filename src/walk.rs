@@ -4,6 +4,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
@@ -92,7 +94,7 @@ pub fn find_iter_with(opts: &FindOptions, walk_root_links: bool) -> Result<FindI
     }))
 }
 
-pub struct StreamIter<T> { rx: mpsc::Receiver<Result<T, RgApiError>>, cancel: Arc<AtomicBool>, worker: Option<std::thread::JoinHandle<()>> }
+pub struct StreamIter<T> { rx: mpsc::Receiver<Result<T, RgApiError>>, cancel: Arc<AtomicBool>, worker: Option<JoinHandle<()>> }
 
 impl<T> StreamIter<T> {
     pub fn cancel(&self) { self.cancel.store(true, Ordering::Relaxed); }
@@ -138,6 +140,7 @@ impl<T> Drop for StreamIter<T> { fn drop(&mut self) { self.cancel(); } }
 #[cfg(test)]
 mod close_tests {
     use super::*;
+    use std::thread;
 
     #[test]
     fn cancel_and_join_drains_full_channel_and_waits_for_worker() {
@@ -147,7 +150,7 @@ mod close_tests {
         let worker_cancel = cancel.clone();
         let done = Arc::new(AtomicBool::new(false));
         let worker_done = done.clone();
-        let worker = std::thread::spawn(move || {
+        let worker = thread::spawn(move || {
             tx.send(Ok(1)).unwrap();
             started.send(()).unwrap();
             // This blocks while the channel is full; close must drain, not just join.
@@ -170,7 +173,7 @@ where T: Send + 'static, F: Fn(Result<DirEntry, ignore::Error>, &Path, &PathFilt
     let (tx, rx) = mpsc::sync_channel(8192);
     let walk = walk.clone();
     let seen = roots.iter().any(|a| roots.iter().any(|b| a != b && a.starts_with(b))).then(|| Arc::new(Mutex::new(HashSet::new())));
-    let worker = std::thread::spawn(move || {
+    let worker = thread::spawn(move || {
         for item in ready { if tx.send(Ok(item)).is_err() { return; } }
         for root in &roots {
             if worker_cancel.load(Ordering::Relaxed) { return; }
@@ -352,6 +355,7 @@ fn re_match(matcher: &RegexMatcher, rel: &str) -> Result<bool, RgApiError> { mat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
     use std::time::Duration;
 
     #[test]
@@ -369,8 +373,8 @@ mod tests {
     fn iter_of(items: Vec<u32>, delay_ms: u64) -> StreamIter<u32> {
         let (tx, rx) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        let worker = std::thread::spawn(move || {
-            for i in items { std::thread::sleep(Duration::from_millis(delay_ms)); if tx.send(Ok(i)).is_err() { return; } }
+        let worker = thread::spawn(move || {
+            for i in items { thread::sleep(Duration::from_millis(delay_ms)); if tx.send(Ok(i)).is_err() { return; } }
         });
         StreamIter { rx, cancel, worker: Some(worker) }
     }
