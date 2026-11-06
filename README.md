@@ -64,6 +64,8 @@ Discovery uses the `ignore` crate with ripgrep's default filters. It reads `.git
 
 Hidden files are skipped unless `hidden=True`. Discovery returns symlinks themselves, including explicitly named roots and dangling links. Set `follow_links=True` to traverse their targets. Paths retain the symlink spelling. Use `same_file_system=True` to avoid crossing filesystem boundaries.
 
+A walk skips each directory or file that it can't read, such as one without read permission, and issues a `RuntimeWarning` that names it. The rest of the walk continues, as ripgrep's does.
+
 Traversal runs in parallel without guaranteed result order. Use `sorted(...)` when order matters.
 
 `fd` takes `pattern` first and `root` second, as `rg` does. With no pattern, it returns every file under `root`. `pattern` is a smart-case regex matched against each basename. Lowercase patterns match case-insensitively. A pattern containing uppercase letters is case-sensitive. Use `path_re` to match the slash-separated relative path instead.
@@ -214,7 +216,7 @@ A matching cell's display starts at its first matched line. Earlier lines are re
 - `count=True` returns the number of matching cells.
 - `timeout_ms` applies a deadline with the same `stop_reason` values as `rg`.
 
-The parser reads only each cell's `id`, `cell_type`, and `source`. It skips outputs and metadata without loading embedded images or plots. `search_nb(pattern, path, ...)` searches a single notebook file in the same way.
+The parser reads only each cell's `id`, `cell_type`, and `source`. It skips outputs and metadata without loading embedded images or plots. `search_nb(pattern, path, ...)` searches a single notebook file in the same way. `nbrg` skips a `.ipynb` file that isn't valid JSON and issues a `RuntimeWarning` naming the file and the parse error. `search_nb` raises `ValueError` for such a file.
 
 `rgapi-nbrg` exposes notebook search without requiring a Python kernel:
 

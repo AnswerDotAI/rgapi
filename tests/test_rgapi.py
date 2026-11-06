@@ -371,8 +371,7 @@ def test_backreferences_and_lookaround(tmp_path):
 
 
 def test_line_local_regexes_and_smart_case():
-    for pattern in [r"foo\s+foo", r"foo[^x]+foo", r"(?s:foo.+foo)", r"foo(?=\s+foo)"]:
-        assert rgstr(pattern, "foo\nfoo\n") == []
+    for pattern in [r"foo\s+foo", r"foo[^x]+foo", r"(?s:foo.+foo)", r"foo(?=\s+foo)"]: assert rgstr(pattern, "foo\nfoo\n") == []
     assert [r.matches for r in rgstr(r"(?s:foo.*|bar)", "foo\nbar\n")] == [[(0, 3)], [(0, 3)]]
     assert compile(r"\Afoo\z").finditer("foo\nfoo\n") == [(0, 3), (4, 7)]
     empty = compile(r"\A\z")
@@ -395,7 +394,7 @@ def test_regex_runtime_errors(tmp_path):
     p.mkdir()
     (tmp_path/(text+".txt")).write_text(text)
     for search in [lambda: compile(pattern).is_match(text), lambda: rgstr(pattern, text),
-                   lambda: fd(pattern, tmp_path), lambda: fd(root=tmp_path, path_re=pattern), lambda: fd(root=tmp_path, skip_dir_re=pattern)]:
+        lambda: fd(pattern, tmp_path), lambda: fd(root=tmp_path, path_re=pattern), lambda: fd(root=tmp_path, skip_dir_re=pattern)]:
         with pytest.raises(ValueError, match="backtrack"): search()
 
 
@@ -498,12 +497,13 @@ def test_file_as_root_searches_just_that_file(tmp_path):
     with pytest.raises(Exception): rg("TODO", str(tmp_path / "nope.txt"))
 
 
-def test_nbrg_skips_bad_json(tmp_path):
-    from rgapi import nbrg
+def test_nbrg_warns_on_bad_json(tmp_path):
+    from rgapi import nbrg, search_nb
     write_nb(tmp_path / "good.ipynb", [_cell("code", ["read_csv(x)\n"], cid="g1")])
     (tmp_path / "bad.ipynb").write_text("{not valid json")
-    a = nbrg("read_csv", str(tmp_path))
+    with pytest.warns(RuntimeWarning, match=r"bad\.ipynb: .* at line 1 column"): a = nbrg("read_csv", tmp_path)
     assert {c.cell_id for c in a} == {"g1"}
+    with pytest.raises(ValueError, match=r"bad\.ipynb: "): search_nb("read_csv", tmp_path / "bad.ipynb")
 
 
 def test_search_nb_single_and_asdict_str(tmp_path):
@@ -717,11 +717,40 @@ def test_file_root_ignores_siblings_and_depth_cap_permissions(tmp_path):
         got = sorted({r.path for r in rg("x", tmp_path, max_depth=1, ignore=False, hidden=True)})
         assert got == [".gitignore", ".hid.txt", "f.txt"]                       # depth-cap dir skipped silently
         assert list(fd(root=tmp_path, max_depth=1, ignore=False)) == [f]
-        with pytest.raises(ValueError, match="ermission"):
-            rg("x", tmp_path)                                     # uncapped: unreadable dir in tree is fatal
-        with pytest.raises(ValueError, match="ermission"):
-            rg("x", tmp_path, max_depth=2)                        # cap above the dir: descent needed, fatal
+        with pytest.warns(RuntimeWarning, match="locked: Permission denied"):
+            assert not rg("x", tmp_path, max_depth=2)              # cap above the dir: descent needed, so it's reported
     finally: locked.chmod(0o755)
+
+def test_unreadable_paths_warn_and_walks_continue(tmp_path):
+    from fastcore.aio import run_sync
+    from rgapi import nbrg, rga, rga_iter
+    (tmp_path / "a.txt").write_text("x\n")
+    write_nb(tmp_path / "a.ipynb", [_cell("code", ["x\n"], cid="c1")])
+    secret = tmp_path / "secret.ipynb"
+    write_nb(secret, [_cell("code", ["x\n"], cid="c2")])
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "b.txt").write_text("x\n")
+    def walk(f):
+        "`f()`'s results, and the names of the paths it warned it skipped"
+        with pytest.warns(RuntimeWarning) as caught: res = f()
+        return res, sorted(Path(str(w.message).partition(": ")[0]).name for w in caught)
+    async def listed(it): return [r async for r in it]
+    searches = [lambda: rg("x", tmp_path), lambda: list(rg_iter("x", tmp_path)), lambda: run_sync(rga("x", tmp_path)),
+        lambda: run_sync(listed(rga_iter("x", tmp_path))), lambda: rg("x", tmp_path, summary=True)]
+    secret.chmod(0o000)
+    locked.chmod(0o000)
+    try:
+        for search in searches:
+            res, skipped = walk(search)
+            assert sorted({r.path for r in res}) == ["a.ipynb", "a.txt"] and skipped == ["locked", "secret.ipynb"]
+        res, skipped = walk(lambda: nbrg("x", tmp_path))
+        assert [c.cell_id for c in res] == ["c1"] and skipped == ["locked", "secret.ipynb"]
+        res, skipped = walk(lambda: fd(root=tmp_path))                 # discovery reads no files, so only the dir is skipped
+        assert sorted(p.name for p in res) == ["a.ipynb", "a.txt", "secret.ipynb"] and skipped == ["locked"]
+    finally:
+        secret.chmod(0o644)
+        locked.chmod(0o755)
 
 def test_symlink_link_target_and_show_target(tmp_path):
     (tmp_path / "real").mkdir()

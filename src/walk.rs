@@ -89,7 +89,7 @@ pub fn find_iter_with(opts: &FindOptions, walk_root_links: bool) -> Result<FindI
         if panic_probe { panic!("rgapi: deliberate panic for tests (panic_probe)"); }
         match find_entry(dent, base, filters, pattern.as_ref(), files, dirs, special_files, max_depth) {
             Ok(Some(path)) => { if cancel.load(Ordering::Relaxed) || tx.send(Ok(path)).is_err() { return WalkState::Quit; } WalkState::Continue }
-            Ok(None) => WalkState::Continue, Err(err) => { let _ = tx.send(Err(err)); WalkState::Quit }
+            Ok(None) => WalkState::Continue, Err(err) => send_error(tx, err)
         }
     }))
 }
@@ -239,11 +239,17 @@ fn file_root_flags(root: &Path, ignore: bool, hidden: bool) -> (bool, bool) { if
 
 // At the max_depth cap the walker opens directories it will never descend into
 // (readdir precedes the depth check in `ignore`), so permission failures there are
-// harmless: skip them (None). Every other walk error is fatal (Some).
+// harmless: skip them silently (None). Report every other walk error as a skipped path (Some).
 pub(crate) fn entry_err(err: ignore::Error, max_depth: Option<usize>) -> Option<RgApiError> {
     let at_cap = max_depth.is_some_and(|m| err.depth().is_some_and(|d| d >= m));
     let denied = err.io_error().is_some_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied);
-    if at_cap && denied { None } else { Some(RgApiError::new(err.to_string())) }
+    if at_cap && denied { None } else { Some(RgApiError::skipped(err)) }
+}
+
+/// Send `err`, then end the walk unless `err` only skipped a path.
+pub(crate) fn send_error<T>(tx: &SyncSender<Result<T, RgApiError>>, err: RgApiError) -> WalkState {
+    let skipped = err.is_skipped();
+    if tx.send(Err(err)).is_ok() && skipped { WalkState::Continue } else { WalkState::Quit }
 }
 
 fn normalize_root(path: &Path) -> Result<PathBuf, RgApiError> {

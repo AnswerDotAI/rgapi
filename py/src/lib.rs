@@ -6,12 +6,12 @@ use std::sync::mpsc::RecvTimeoutError;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyRuntimeWarning, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 
 use rgapi::{
-    FindIter, FindOptions, NbCell, NbIter, NbOptions, RgIter, RgOptions, SearchBlock, SearchLine, StreamIter, WalkOptions as WalkOptionsCore,
+    FindIter, FindOptions, NbCell, NbIter, NbOptions, RgApiError, RgIter, RgOptions, SearchBlock, SearchLine, StreamIter, WalkOptions as WalkOptionsCore,
     block_iter as block_iter_core, compile_regex, find, find_iter as find_iter_core, find_iter_with, nb_iter as nb_iter_core, nb_search_file, resolve_roots,
     rg_iter as rg_iter_core, search_path as search_path_core, search_text as search_text_core, spans_for,
 };
@@ -106,14 +106,26 @@ fn check_signals_or_cancel<T>(py: Python<'_>, iter: &StreamIter<T>) -> PyResult<
     Ok(())
 }
 
+/// Warn about a path that a walk skipped because it couldn't read it, as ripgrep reports such a path. Any other error raises `ValueError`.
+fn skip_or_raise(py: Python<'_>, err: RgApiError) -> PyResult<()> {
+    if !err.is_skipped() { return Err(PyValueError::new_err(err.to_string())); }
+    PyErr::warn(py, py.get_type::<PyRuntimeWarning>().as_any(), &std::ffi::CString::new(err.to_string())?, 1)
+}
+
+/// `skip_or_raise` on a worker thread. Gives the message of an error that ends the stream, or `None` when the walk only skipped a path.
+fn worker_error(err: RgApiError) -> Option<String> {
+    if !err.is_skipped() { return Some(err.to_string()); }
+    Python::attach(|py| skip_or_raise(py, err).err().map(|e| e.to_string()))
+}
+
 fn next_stream_py<T: Send>(py: Python<'_>, iter: &mut StreamIter<T>) -> PyResult<Option<T>> {
     loop {
         check_signals_or_cancel(py, iter)?;
         let res = py.detach(|| iter.next_timeout(Duration::from_millis(50)));
         check_signals_or_cancel(py, iter)?;
         match res {
-            Ok(Ok(line)) => return Ok(Some(line)), Ok(Err(err)) => return Err(PyValueError::new_err(err.to_string())),
-            Err(RecvTimeoutError::Disconnected) => return Ok(None), Err(RecvTimeoutError::Timeout) => continue
+            Ok(Ok(line)) => return Ok(Some(line)), Ok(Err(err)) => skip_or_raise(py, err)?, Err(RecvTimeoutError::Disconnected) => return Ok(None),
+            Err(RecvTimeoutError::Timeout) => continue
         }
     }
 }
@@ -132,8 +144,8 @@ fn collect_stream_py<T: Send, P>(py: Python<'_>, mut iter: StreamIter<T>, conv: 
         let next = py.detach(|| iter.next_timeout(wait));
         check_signals_or_cancel(py, &iter)?;
         match next {
-            Ok(Ok(line)) => res.push(conv(line)), Ok(Err(err)) => return Err(PyValueError::new_err(err.to_string())),
-            Err(RecvTimeoutError::Disconnected) => return Ok((res, false)), Err(RecvTimeoutError::Timeout) => {}
+            Ok(Ok(line)) => res.push(conv(line)), Ok(Err(err)) => skip_or_raise(py, err)?, Err(RecvTimeoutError::Disconnected) => return Ok((res, false)),
+            Err(RecvTimeoutError::Timeout) => {}
         }
     }
 }
@@ -279,9 +291,11 @@ fn drain_stream<T>(iter: &mut StreamIter<T>, flag: &Arc<AtomicBool>, deadline: O
         match iter.next_timeout(wait) {
             Ok(Ok(line)) => rows.push(line),
             Ok(Err(e)) => {
-                err = Some(e.to_string());
-                iter.cancel();
-                break;
+                if let Some(e) = worker_error(e) {
+                    err = Some(e);
+                    iter.cancel();
+                    break;
+                }
             }
             Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {}
@@ -318,13 +332,13 @@ fn stream_iter_async<T, C>(cb: Py<PyAny>, mut iter: StreamIter<T>, batch_max: us
         loop {
             if flag.load(Ordering::Relaxed) { break; }
             let first = match iter.next_timeout(Duration::from_millis(50)) {
-                Ok(Ok(line)) => line, Ok(Err(e)) => { err = Some(e.to_string()); break; } Err(RecvTimeoutError::Disconnected) => break,
-                Err(RecvTimeoutError::Timeout) => continue
+                Ok(Ok(line)) => line, Ok(Err(e)) => match worker_error(e) { Some(e) => { err = Some(e); break; } None => continue },
+                Err(RecvTimeoutError::Disconnected) => break, Err(RecvTimeoutError::Timeout) => continue
             };
             let mut batch = vec![first];
             while batch.len() < batch_max {
                 match iter.next_timeout(Duration::ZERO) {
-                    Ok(Ok(line)) => batch.push(line), Ok(Err(e)) => { err = Some(e.to_string()); break; } Err(_) => break
+                    Ok(Ok(line)) => batch.push(line), Ok(Err(e)) => { if let Some(e) = worker_error(e) { err = Some(e); break; } } Err(_) => break
                 }
             }
             let failed = Python::attach(|py| match conv(py, batch) { Ok(res) => cb.call1(py, (res, None::<String>)).is_err(), Err(_) => true });

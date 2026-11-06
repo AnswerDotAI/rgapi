@@ -11,7 +11,7 @@ use ignore::{DirEntry, WalkState};
 use serde::Deserialize;
 
 use crate::search::{SearchLine, search_text};
-use crate::walk::{PathFilters, StreamIter, WalkOptions, entry_err, rel_path, resolve_roots, spawn_walk};
+use crate::walk::{PathFilters, StreamIter, WalkOptions, entry_err, rel_path, resolve_roots, send_error, spawn_walk};
 use crate::{RgApiError, compile_regex};
 
 static HEADING_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^#{1,6} \w").unwrap());
@@ -125,9 +125,13 @@ impl Source {
     fn text(&self) -> String { match self { Source::Lines(v) => v.concat(), Source::Text(s) => s.clone(), Source::Empty => String::new() } }
 }
 
-fn process_file(disp: String, bytes: &[u8], matcher: &RegexMatcher, cell_context: usize, multiline: bool) -> Result<Vec<NbCell>, RgApiError> {
-    // Not a parseable notebook (bad JSON, or JSON that isn't a notebook): skip, like a binary file.
-    let nb: RawNb = match serde_json::from_slice(bytes) { Ok(nb) => nb, Err(_) => return Ok(Vec::new()) };
+/// The notebook at `path`. A file that can't be read, or parsed as a notebook, gives a skipped error naming `path`.
+fn notebook(path: &Path) -> Result<RawNb, RgApiError> {
+    let bytes = fs::read(path).map_err(|err| RgApiError::unreadable(path, err))?;
+    serde_json::from_slice(&bytes).map_err(|err| RgApiError::unreadable(path, err))
+}
+
+fn process_file(disp: String, nb: RawNb, matcher: &RegexMatcher, cell_context: usize, multiline: bool) -> Result<Vec<NbCell>, RgApiError> {
     let n = nb.cells.len();
     let mut info = Vec::with_capacity(n);
     let mut matched: Vec<(usize, Vec<SearchLine>)> = Vec::new();
@@ -157,8 +161,7 @@ pub fn nb_search_file(
     path: &Path, display_path: String, pattern: &str, case_sensitive: Option<bool>, smart_case: bool, cell_context: usize, multiline: bool
 ) -> Result<Vec<NbCell>, RgApiError> {
     let matcher = compile_regex(pattern, case_sensitive, smart_case, multiline)?;
-    let bytes = match fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
-    process_file(display_path, &bytes, &matcher, cell_context, multiline)
+    process_file(display_path, notebook(path)?, &matcher, cell_context, multiline)
 }
 
 fn nb_entry(
@@ -170,8 +173,7 @@ fn nb_entry(
     if !ft.is_file() { return Ok(Vec::new()); }
     let rel = rel_path(base, path);
     if !filters.path_allowed(Path::new(&rel))? { return Ok(Vec::new()); }
-    let bytes = match fs::read(path) { Ok(b) => b, Err(_) => return Ok(Vec::new()) };
-    process_file(rel, &bytes, matcher, cell_context, multiline)
+    process_file(rel, notebook(path)?, matcher, cell_context, multiline)
 }
 
 pub type NbIter = StreamIter<NbCell>;
@@ -187,7 +189,7 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
                 for cell in cells { if cancel.load(Ordering::Relaxed) || tx.send(Ok(cell)).is_err() { return WalkState::Quit; } }
                 WalkState::Continue
             }
-            Err(err) => { let _ = tx.send(Err(err)); WalkState::Quit }
+            Err(err) => send_error(tx, err),
         }
     }))
 }

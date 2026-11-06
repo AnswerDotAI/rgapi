@@ -9,7 +9,7 @@ use crate::RegexMatcher;
 use ignore::{DirEntry, WalkState};
 
 use crate::search::{RgOptions, SearchLine, format_lnhash, search_text};
-use crate::walk::{PathFilters, StreamIter, entry_err, rel_path, resolve_roots, spawn_walk};
+use crate::walk::{PathFilters, StreamIter, entry_err, rel_path, resolve_roots, send_error, spawn_walk};
 use crate::{RgApiError, compile_regex};
 
 /// One blank-line-delimited block containing a match, or context for one.
@@ -84,7 +84,7 @@ fn block_entry(
     if !ft.is_file() { return Ok(Vec::new()); }
     let rel = rel_path(base, path);
     if !filters.path_allowed(Path::new(&rel))? { return Ok(Vec::new()); }
-    let bytes = match fs::read(path) { Ok(bytes) => bytes, Err(_) => return Ok(Vec::new()) };
+    let bytes = fs::read(path).map_err(|err| RgApiError::unreadable(path, err))?;
     process_file(rel, &bytes, matcher, before_context, after_context)
 }
 
@@ -101,7 +101,7 @@ pub fn block_iter(opts: &RgOptions) -> Result<BlockIter, RgApiError> {
                 for block in blocks { if cancel.load(Ordering::Relaxed) || tx.send(Ok(block)).is_err() { return WalkState::Quit; } }
                 WalkState::Continue
             }
-            Err(err) => { let _ = tx.send(Err(err)); WalkState::Quit }
+            Err(err) => send_error(tx, err),
         }
     }))
 }

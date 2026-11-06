@@ -9,7 +9,7 @@ use grep_matcher::LineTerminator;
 use grep_searcher::{BinaryDetection, SearcherBuilder, Sink, SinkContext, SinkContextKind, SinkError, SinkMatch};
 use ignore::{DirEntry, WalkState};
 
-use crate::walk::{PathFilters, StreamIter, WalkOptions, entry_err, rel_path, resolve_roots, spawn_walk};
+use crate::walk::{PathFilters, StreamIter, WalkOptions, entry_err, rel_path, resolve_roots, send_error, spawn_walk};
 use crate::{RgApiError, compile_regex};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,26 +49,24 @@ fn search_entry(
     max_depth: Option<usize>, tx: &SyncSender<Result<SearchLine, RgApiError>>, cancel: &Arc<AtomicBool>) -> WalkState {
     if is_cancelled(cancel) { return WalkState::Quit; }
     let dent = match entry {
-        Ok(dent) => dent, Err(err) => { return match entry_err(err, max_depth) { Some(e) => send_search_error(tx, e), None => WalkState::Continue }; }
+        Ok(dent) => dent, Err(err) => { return match entry_err(err, max_depth) { Some(e) => send_error(tx, e), None => WalkState::Continue }; }
     };
     let path = dent.path();
     let Some(ft) = dent.file_type() else { return WalkState::Continue; };
     if !ft.is_file() { return WalkState::Continue; }
     let rel = rel_path(base, path);
-    match filters.path_allowed(Path::new(&rel)) { Ok(true) => {} Ok(false) => return WalkState::Continue, Err(err) => return send_search_error(tx, err) }
+    match filters.path_allowed(Path::new(&rel)) { Ok(true) => {} Ok(false) => return WalkState::Continue, Err(err) => return send_error(tx, err) }
     match search_path_cancelable(path, rel, matcher.clone(), before_context, after_context, Some(cancel.clone())) {
         Ok(lines) => {
             if is_cancelled(cancel) { return WalkState::Quit; }
             for line in lines { if is_cancelled(cancel) || tx.send(Ok(line)).is_err() { return WalkState::Quit; } }
             WalkState::Continue
         }
-        Err(err) => send_search_error(tx, err),
+        Err(err) => send_error(tx, err),
     }
 }
 
 fn is_cancelled(cancel: &Arc<AtomicBool>) -> bool { cancel.load(Ordering::Relaxed) }
-
-fn send_search_error(tx: &SyncSender<Result<SearchLine, RgApiError>>, err: RgApiError) -> WalkState { let _ = tx.send(Err(err)); WalkState::Quit }
 
 pub(crate) fn format_lnhash(lineno: u64, line: &str) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -91,7 +89,8 @@ fn search_path_cancelable(
     let mut out = Vec::new();
     let search_matcher = matcher.clone();
     let sink = CollectSink { path: display_path, matcher, lines: &mut out, cancel };
-    match searcher.search_path(search_matcher, path, sink) {
+    let file = std::fs::File::open(path).map_err(|err| RgApiError::unreadable(path, err))?;
+    match searcher.search_file(search_matcher, &file, sink) {
         Ok(()) => Ok(out), Err(SearchError::InvalidUtf8) => Ok(Vec::new()), Err(err) => Err(RgApiError::new(err.to_string()))
     }
 }

@@ -13,10 +13,17 @@ pub use nb::{CellRefs, NbCell, NbIter, NbOptions, ancestor_indices, cell_refs, h
 pub use search::{MatchSpan, RgIter, RgOptions, SearchError, SearchKind, SearchLine, rg, rg_iter, search_path, search_text, spans_for};
 pub use walk::{FindIter, FindOptions, StreamIter, WalkOptions, find, find_iter, find_iter_with, resolve_roots};
 
+/// An rgapi failure. `is_skipped` marks an error naming one path that a walk couldn't read, such as a directory without read permission.
+/// The walk sends that error and continues, as ripgrep does. Rust's collecting functions, such as `find`, return the first error of either kind.
 #[derive(Debug, Clone)]
-pub struct RgApiError { msg: String }
+pub struct RgApiError { msg: String, skipped: bool }
 
-impl RgApiError { pub(crate) fn new(msg: impl Into<String>) -> Self { Self { msg: msg.into() } } }
+impl RgApiError {
+    pub(crate) fn new(msg: impl Into<String>) -> Self { Self { msg: msg.into(), skipped: false } }
+    pub(crate) fn skipped(msg: impl Display) -> Self { Self { msg: msg.to_string(), skipped: true } }
+    pub(crate) fn unreadable(path: &std::path::Path, err: impl Display) -> Self { Self::skipped(format!("{}: {err}", path.display())) }
+    pub fn is_skipped(&self) -> bool { self.skipped }
+}
 
 impl Display for RgApiError { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.msg) } }
 
