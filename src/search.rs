@@ -29,7 +29,7 @@ pub struct RgOptions {
     pub panic_probe: bool
 }
 
-pub fn rg(opts: &RgOptions) -> Result<Vec<SearchLine>, RgApiError> { rg_iter(opts)?.collect() }
+pub fn rg(opts: &RgOptions) -> Result<Vec<SearchLine>, RgApiError> { Ok(rg_iter(opts)?.collect_timeout(None)?.0) }
 
 pub fn rg_iter(opts: &RgOptions) -> Result<RgIter, RgApiError> {
     let (roots, base) = resolve_roots(&opts.walk, true, false)?;

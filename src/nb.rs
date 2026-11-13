@@ -194,4 +194,4 @@ pub fn nb_iter(opts: &NbOptions) -> Result<NbIter, RgApiError> {
     }))
 }
 
-pub fn nb_search(opts: &NbOptions) -> Result<Vec<NbCell>, RgApiError> { nb_iter(opts)?.collect() }
+pub fn nb_search(opts: &NbOptions) -> Result<Vec<NbCell>, RgApiError> { Ok(nb_iter(opts)?.collect_timeout(None)?.0) }

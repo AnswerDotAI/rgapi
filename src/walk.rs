@@ -62,7 +62,7 @@ impl Default for FindOptions {
     }
 }
 
-pub fn find(opts: &FindOptions) -> Result<Vec<PathBuf>, RgApiError> { find_iter(opts)?.collect() }
+pub fn find(opts: &FindOptions) -> Result<Vec<PathBuf>, RgApiError> { Ok(find_iter(opts)?.collect_timeout(None)?.0) }
 
 pub type FindIter = StreamIter<PathBuf>;
 
@@ -114,16 +114,16 @@ impl<T> StreamIter<T> {
 
     pub fn next_timeout(&mut self, timeout: Duration) -> Result<Result<T, RgApiError>, RecvTimeoutError> { self.rx.recv_timeout(timeout) }
 
-    /// Collect all items, stopping at `timeout_ms`; the bool is true when the deadline stopped it.
+    /// Collect all items, skipping paths the walk couldn't read, and stop at `timeout_ms`; the bool is true when the deadline stopped it.
     pub fn collect_timeout(mut self, timeout_ms: Option<u64>) -> Result<(Vec<T>, bool), RgApiError> {
-        let Some(ms) = timeout_ms else { return Ok((self.collect::<Result<Vec<_>, _>>()?, false)); };
+        let Some(ms) = timeout_ms else { return Ok((self.filter(|r| !r.as_ref().is_err_and(RgApiError::is_skipped)).collect::<Result<Vec<_>, _>>()?, false)); };
         let deadline = Instant::now() + Duration::from_millis(ms);
         let mut res = Vec::new();
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() { return Ok((res, true)); }
             match self.next_timeout(left) {
-                Ok(Ok(item)) => res.push(item), Ok(Err(err)) => return Err(err), Err(RecvTimeoutError::Disconnected) => return Ok((res, false)),
+                Ok(Ok(item)) => res.push(item), Ok(Err(err)) if err.is_skipped() => (), Ok(Err(err)) => return Err(err), Err(RecvTimeoutError::Disconnected) => return Ok((res, false)),
                 Err(RecvTimeoutError::Timeout) => return Ok((res, true))
             }
         }
@@ -402,5 +402,18 @@ mod tests {
         let (got, timed_out) = iter_of(vec![1, 2, 3], 200).collect_timeout(Some(20)).unwrap();
         assert!(got.is_empty());
         assert!(timed_out);
+    }
+
+    fn results_of(items: Vec<Result<u32, RgApiError>>) -> StreamIter<u32> {
+        let (tx, rx) = mpsc::channel();
+        for item in items { tx.send(item).unwrap(); }
+        StreamIter { rx, cancel: Arc::new(AtomicBool::new(false)), worker: None }
+    }
+
+    #[test]
+    fn collect_timeout_skips_skipped_errors() {
+        let items = || vec![Ok(1), Err(RgApiError::skipped("unreadable")), Ok(2)];
+        for ms in [None, Some(60_000)] { assert_eq!(results_of(items()).collect_timeout(ms).unwrap(), (vec![1, 2], false)); }
+        for ms in [None, Some(60_000)] { assert!(results_of(vec![Ok(1), Err(RgApiError::new("bad pattern"))]).collect_timeout(ms).is_err()); }
     }
 }
