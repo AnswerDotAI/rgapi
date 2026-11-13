@@ -159,6 +159,21 @@ def test_path_filters_prune_dirs_and_follow_links(tmp_path):
     assert fd(root=str(tmp_path), path_re=r"linked/.*\.py$", follow_links=False) == []
     assert fd(root=str(tmp_path), path_re=r"linked/.*\.py$", follow_links=True) == [tmp_path/"linked/app.py"]
 
+def test_confine_skips_links_leading_outside(tmp_path):
+    root, out = tmp_path/"root", tmp_path/"out"
+    (root/"sub").mkdir(parents=True)
+    out.mkdir()
+    for p in (root/"in.txt", root/"sub/deep.txt", out/"far.txt"): p.write_text("needle\n")
+    try:
+        (root/"outdir").symlink_to(out, target_is_directory=True)
+        (root/"far.txt").symlink_to(out/"far.txt")
+        (root/"insub").symlink_to(root/"sub", target_is_directory=True)
+    except OSError: return
+    assert root/"outdir/far.txt" in fd(root=root, follow_links=True)
+    assert set(fd(root=root, follow_links=True, confine=root)) == {root/p for p in ("in.txt", "sub/deep.txt", "insub/deep.txt")}
+    assert {r.path for r in rg("needle", root, follow_links=True, confine=root)} == {"in.txt", "sub/deep.txt", "insub/deep.txt"}
+    with pytest.raises(ValueError): fd(root=root/"outdir", follow_links=True, confine=root)
+
 def test_rgignore_is_honored(tmp_path):
     (tmp_path / ".rgignore").write_text("only_rg.txt\n")
     (tmp_path / "only_rg.txt").write_text("hi\n")

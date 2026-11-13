@@ -28,7 +28,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for WalkOptions {
             skip_dir_re: obj.get_item("skip_dir_re")?.extract()?, hidden: obj.get_item("hidden")?.extract()?, ignore: obj.get_item("ignore")?.extract()?,
             max_depth: obj.get_item("max_depth")?.extract()?, min_depth: obj.get_item("min_depth")?.extract()?,
             max_filesize: obj.get_item("max_filesize")?.extract()?, follow_links: obj.get_item("follow_links")?.extract()?,
-            same_file_system: obj.get_item("same_file_system")?.extract()? }))
+            same_file_system: obj.get_item("same_file_system")?.extract()?, confine: obj.get_item("confine")?.extract()? }))
     }
 }
 

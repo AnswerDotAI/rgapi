@@ -62,7 +62,7 @@ A list of roots, such as `rg("TODO", ["src", "tests"])`, works with every walk a
 
 Discovery uses the `ignore` crate with ripgrep's default filters. It reads `.gitignore`, `.ignore`, and `.rgignore` files. `.rgignore` takes precedence over `.gitignore`. Pass `ignore=False` to disable all ignore-file filtering, including `.rgignore`.
 
-Hidden files are skipped unless `hidden=True`. Discovery returns symlinks themselves, including explicitly named roots and dangling links. Set `follow_links=True` to traverse their targets. Paths retain the symlink spelling. Use `same_file_system=True` to avoid crossing filesystem boundaries.
+Hidden files are skipped unless `hidden=True`. Discovery returns symlinks themselves, including explicitly named roots and dangling links. Set `follow_links=True` to traverse their targets. Paths retain the symlink spelling. With `follow_links=True`, `confine=DIR` skips each link whose target resolves outside `DIR`. A walked root outside `DIR` raises `ValueError`. Use `same_file_system=True` to avoid crossing filesystem boundaries.
 
 A walk skips each directory or file that it can't read, such as one without read permission, and issues a `RuntimeWarning` that names it. The rest of the walk continues, as ripgrep's does.
 
@@ -84,7 +84,7 @@ Set `min_depth` and `max_depth` to bound recursion. `max_filesize` skips files a
 
 ## Text search
 
-`rg` and `rg_iter` return structured `SearchLine` rows. They accept the same filters as `fd`: `include`, `exclude`, `glob`, `ext`, `path_re`, `skip_path_re`, `skip_dir`, `skip_dir_re`, `min_depth`, `max_depth`, `max_filesize`, `follow_links`, and `same_file_system`.
+`rg` and `rg_iter` return structured `SearchLine` rows. They accept the same filters as `fd`: `include`, `exclude`, `glob`, `ext`, `path_re`, `skip_path_re`, `skip_dir`, `skip_dir_re`, `min_depth`, `max_depth`, `max_filesize`, `follow_links`, `confine`, and `same_file_system`.
 
 Search is case-sensitive by default, matching `rg`. Use `smart_case=True` for `rg --smart-case` behaviour. Use `case_sensitive=False` to force case-insensitive matching.
 
