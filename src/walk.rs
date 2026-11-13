@@ -35,13 +35,16 @@ pub struct WalkOptions {
     pub max_filesize: Option<u64>,
     pub follow_links: bool,
     pub same_file_system: bool,
+    /// Keep the walk inside this folder. A walked root must resolve inside it. With `follow_links`, a link to a file or folder
+    /// that resolves outside it is not returned, read or entered.
+    pub confine: Option<PathBuf>,
 }
 
 impl Default for WalkOptions {
     fn default() -> Self {
         Self { roots: vec![PathBuf::from(".")], includes: Vec::new(), excludes: Vec::new(), exts: Vec::new(), path_re: None, skip_path_re: None,
             skip_dirs: Vec::new(), skip_dir_re: None, hidden: false, ignore: true, max_depth: None, min_depth: None, max_filesize: None, follow_links: false,
-            same_file_system: false }
+            same_file_system: false, confine: None }
     }
 }
 
@@ -257,6 +260,7 @@ fn normalize_root(path: &Path) -> Result<PathBuf, RgApiError> {
 }
 
 /// Return the distinct roots and their base. Each root is made absolute. With `canonical`, each root is also canonicalized.
+/// With `confine`, a root that is walked, not returned as a link, must resolve inside it.
 pub fn resolve_roots(walk: &WalkOptions, canonical: bool, walk_root_links: bool) -> Result<(Vec<PathBuf>, PathBuf), RgApiError> {
     let mut roots = Vec::new();
     for root in &walk.roots {
@@ -272,7 +276,15 @@ pub fn resolve_roots(walk: &WalkOptions, canonical: bool, walk_root_links: bool)
         roots.iter().map(|r| if (follow || !r.is_symlink()) && r.is_dir() { r.clone() } else { r.parent().map_or_else(|| r.clone(), Path::to_path_buf) });
     let mut base = bases.next().unwrap_or_default();
     for b in bases { while !b.starts_with(&base) && base.pop() {} }
+    if let Some(confine) = confine_dir(walk)?
+        && let Some(r) = roots.iter().find(|r| (follow || !r.is_symlink()) && r.canonicalize().is_ok_and(|c| !c.starts_with(&confine))) {
+        return Err(RgApiError::new(format!("root is outside {}: {}", confine.display(), r.display())));
+    }
     Ok((roots, base))
+}
+
+fn confine_dir(walk: &WalkOptions) -> Result<Option<PathBuf>, RgApiError> {
+    walk.confine.as_deref().map(|c| c.canonicalize().map_err(|e| RgApiError::new(format!("confine {}: {e}", c.display())))).transpose()
 }
 
 fn relative_path<'a>(base: &Path, path: &'a Path) -> &'a Path {
@@ -309,14 +321,15 @@ fn filter_dirs<T: Send + 'static>(
 
 pub(crate) struct PathFilters {
     includes: Option<GlobSet>, excludes: Option<GlobSet>, exts: Option<GlobSet>, path_re: Option<RegexMatcher>, skip_path_re: Option<RegexMatcher>,
-    skip_dirs: Option<GlobSet>, skip_dir_re: Option<RegexMatcher>
+    skip_dirs: Option<GlobSet>, skip_dir_re: Option<RegexMatcher>, confine: Option<PathBuf>
 }
 
 impl PathFilters {
     pub(crate) fn new(walk: &WalkOptions) -> Result<Self, RgApiError> {
         Ok(Self { includes: build_globs(&walk.includes)?, excludes: build_globs(&walk.excludes)?, exts: build_globs(&walk.exts)?,
             path_re: build_path_re(walk.path_re.as_deref())?, skip_path_re: build_path_re(walk.skip_path_re.as_deref())?,
-            skip_dirs: build_globs(&walk.skip_dirs)?, skip_dir_re: build_path_re(walk.skip_dir_re.as_deref())? })
+            skip_dirs: build_globs(&walk.skip_dirs)?, skip_dir_re: build_path_re(walk.skip_dir_re.as_deref())?,
+            confine: if walk.follow_links { confine_dir(walk)? } else { None } })
     }
 
     pub(crate) fn path_allowed(&self, path: &Path) -> Result<bool, RgApiError> {
@@ -331,6 +344,7 @@ impl PathFilters {
     fn entry_allowed(&self, base: &Path, dent: &DirEntry) -> Result<bool, RgApiError> {
         let path = dent.path();
         if dent.depth() == 0 { return Ok(true); }
+        if let Some(confine) = &self.confine && dent.path_is_symlink() && !path.canonicalize().is_ok_and(|p| p.starts_with(confine)) { return Ok(false); }
         let Some(ft) = dent.file_type() else { return Ok(true); };
         if !ft.is_dir() { return Ok(true); }
         let rel = relative_path(base, path);
@@ -402,5 +416,37 @@ mod tests {
         let (got, timed_out) = iter_of(vec![1, 2, 3], 200).collect_timeout(Some(20)).unwrap();
         assert!(got.is_empty());
         assert!(timed_out);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn confine_skips_links_leading_outside() {
+        use std::os::unix::fs::symlink;
+        let tmp = std::env::temp_dir().join(format!("rgapi-confine-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let (root, out) = (tmp.join("root"), tmp.join("out"));
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        for p in [root.join("in.txt"), root.join("sub/deep.txt"), out.join("far.txt")] { std::fs::write(p, "needle\n").unwrap(); }
+        symlink(root.join("sub"), root.join("insub")).unwrap();
+        symlink(&out, root.join("outdir")).unwrap();
+        symlink(out.join("far.txt"), root.join("far.txt")).unwrap();
+        symlink(root.join("missing.txt"), root.join("gone.txt")).unwrap();
+        let walk = |roots: Vec<PathBuf>, confine: bool| WalkOptions { roots, follow_links: true, confine: confine.then(|| root.clone()), ..Default::default() };
+        let names = |w: WalkOptions| {
+            let mut v: Vec<String> = find_iter(&FindOptions { walk: w, ..Default::default() }).unwrap().filter_map(Result::ok).map(|p| path_label(&p)).collect();
+            v.sort();
+            v
+        };
+        assert_eq!(names(walk(vec![root.clone()], false)), ["far.txt", "gone.txt", "in.txt", "insub/deep.txt", "outdir/far.txt", "sub/deep.txt"]);
+        assert_eq!(names(walk(vec![root.clone()], true)), ["gone.txt", "in.txt", "insub/deep.txt", "sub/deep.txt"]);
+        let rg = crate::RgOptions { walk: walk(vec![root.clone()], true), pattern: "needle".into(), ..Default::default() };
+        let mut hits: Vec<String> = crate::rg_iter(&rg).unwrap().filter_map(Result::ok).map(|l| l.path).collect();
+        hits.sort();
+        assert_eq!(hits, ["in.txt", "insub/deep.txt", "sub/deep.txt"]);
+        assert!(find_iter(&FindOptions { walk: walk(vec![root.join("outdir")], true), ..Default::default() }).is_err());
+        let unfollowed = WalkOptions { roots: vec![root.join("outdir")], confine: Some(root.clone()), ..Default::default() };
+        assert_eq!(names(unfollowed), ["outdir"]);
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 }

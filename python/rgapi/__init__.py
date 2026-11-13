@@ -107,6 +107,7 @@ def _walk_args(
     max_filesize:int|None=None, # Skip files larger than this many bytes
     follow_links:bool=False, # Follow symbolic links while walking
     same_file_system:bool=False, # Do not cross filesystem boundaries
+    confine:str|PathLike|None=None, # Folder that walked roots and followed links must resolve inside
     path_re:str|None=None, # Regex that relative paths must match
     skip_path_re:str|None=None, # Regex for relative paths to skip
     skip_dir:str|list|None=None, # Directory glob or globs to prune
@@ -116,7 +117,7 @@ def _walk_args(
     include, exclude, exts = _filters(glob, include, exclude, ext)
     return dict(includes=include, excludes=exclude, exts=exts, hidden=hidden, ignore=ignore, max_depth=max_depth, min_depth=min_depth,
         max_filesize=max_filesize, follow_links=follow_links, same_file_system=same_file_system, path_re=path_re, skip_path_re=skip_path_re,
-        skip_dirs=_listify(skip_dir), skip_dir_re=skip_dir_re)
+        skip_dirs=_listify(skip_dir), skip_dir_re=skip_dir_re, confine=confine and Path(confine).expanduser())
 
 def _walk(root, **kwargs):
     "`_core` walk options for `root`, which is one path or an iterable of paths, and the shared walk parameters"
