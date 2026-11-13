@@ -14,7 +14,7 @@ pub use search::{MatchSpan, RgIter, RgOptions, SearchError, SearchKind, SearchLi
 pub use walk::{FindIter, FindOptions, StreamIter, WalkOptions, find, find_iter, find_iter_with, resolve_roots};
 
 /// An rgapi failure. `is_skipped` marks an error naming one path that a walk couldn't read, such as a directory without read permission.
-/// The walk sends that error and continues, as ripgrep does. Rust's collecting functions, such as `find`, return the first error of either kind.
+/// The walk sends that error and continues, as ripgrep does. Rust's collecting functions, such as `find` and `StreamIter::collect_timeout`, skip these and return any other error.
 #[derive(Debug, Clone)]
 pub struct RgApiError { msg: String, skipped: bool }
 
