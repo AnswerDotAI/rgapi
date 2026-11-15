@@ -1,14 +1,17 @@
+# NB: this file is designed for an LLM reader, not a human. Add it to your LLM's context and ask it to explain.
 """Find files, search text, and search notebook cell sources from Python with ripgrep semantics and structured results. Use for fd-style discovery, regex searches, and notebook searches returning stable cell IDs rather than escaped JSON.
 
-Built on ripgrep's `ignore` and `grep-searcher` crates with pure-Rust `fancy-regex`: ignore files, hidden files, globs and extensions follow ripgrep conventions. All regex parameters support backreferences and lookaround without an engine flag. Content matching is line-local unless `nbrg(multiline=True)` is used; filename/path regexes match their full input. Regex compilation or backtracking-limit failures raise `ValueError`; cancellation cannot interrupt an in-progress regex evaluation. A walk skips each directory or file that it can't read, and each notebook that `nbrg` can't parse. Each skip issues a `RuntimeWarning` that names the path. Prefer these to shell parsing or manual file scans: `fd`/`ls` for listings, `rg` for files, `nbrg` for notebook cells, `rgstr` for text already in hand.
-
-Orient with `rg(summary=True)`: one row per block (a paragraph of prose/config) with boundary addresses, where line results show fragments that may need another view. Switch to line results where needed; add `lnhashs=True` when edits may follow. Display results bare; narrow oversized results with parameters, not by joining, slicing, or reformatting.
-
-Walking and searching run in parallel: sort when order matters. Shared walk parameters (`fd`, `ls`, `rg`, `nbrg`): `path_re`/`skip_path_re` filter paths without pruning; `skip_dir`/`skip_dir_re` prune subtrees. Without `follow_links`, links (including root and dangling links) are returned as entries (`ls` instead lists a root link to a directory) and linked directories aren't walked; `follow_links=True` walks linked directories (listing them as directories), still returns file links at their link path, and returns dangling links as entries. `root` can be a list of paths. Results and filters then use paths relative to the common ancestor of the roots. A file under two roots appears once.
-
-## Results
-
-`fd`, `ls`, and `paths=True` return `PathResults` of absolute `pathlib.Path`s. `rg` returns `SearchLine` rows (`SearchBlock` with `summary=True`); `nbrg` returns `NbCell` rows. `doc()` on `rg`, `nbrg`, `PathResults`, `SearchBlock`, and `NbCell` gives their rules, fields, and displays. `SearchLine` fields: `path`, 1-based `line_number`, `lnhash`, `line` (no trailing newline), `kind` (match/before/after/context); match rows add `matches`, byte-offset `(start, end)` pairs.
+- prefer over shell parsing or manual file scans
+- edits may follow: `lnhashs=True`; orient first: `rg(summary=True)`, then line results where needed    /line results show fragments
+- display bare; too much: narrow with parameters, never join, slice or reformat
+- regex parameters: fancy-regex, no engine flag; ignore files, hidden files, globs, extensions: ripgrep's rules
+- walk, search: parallel: sort when order matters; unreadable file or directory, notebook `nbrg` can't parse: skipped, `RuntimeWarning` naming it
+- `path_re`, `skip_path_re`: filter paths, no pruning; `skip_dir`, `skip_dir_re`: prune subtrees
+- links, without `follow_links`: returned as entries, root and dangling ones too; linked directories not walked
+- `follow_links=True`: linked directories walked, listed as directories; file links at link path; dangling links still entries
+- several roots: results, filters relative to their common ancestor; a file under two roots appears once
+- `SearchLine` (`rg` row): `path`, `line_number` (1-based), `lnhash`, `line` (no trailing newline), `kind` (match, before, after, context); match rows add `matches`: byte-offset `(start, end)` pairs
+- other results: `PathResults` (`fd`, `ls`, `paths=True`), `SearchBlock` (`summary=True`), `NbCell` (`nbrg`): `doc()` each
 """
 
 from . import RgIter, fd, ls, nbrg, rg, rg_iter, rgstr
