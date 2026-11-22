@@ -21,6 +21,8 @@ documentation = "https://github.com/AnswerDotAI/rgapi"
 
 [lib]
 name = "rgapi"
+test = false
+doctest = false
 
 [dependencies]
 crc32fast = "1"

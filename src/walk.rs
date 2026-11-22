@@ -97,6 +97,8 @@ pub fn find_iter_with(opts: &FindOptions, walk_root_links: bool) -> Result<FindI
 pub struct StreamIter<T> { rx: mpsc::Receiver<Result<T, RgApiError>>, cancel: Arc<AtomicBool>, worker: Option<JoinHandle<()>> }
 
 impl<T> StreamIter<T> {
+    pub fn new(rx: mpsc::Receiver<Result<T, RgApiError>>, cancel: Arc<AtomicBool>, worker: Option<JoinHandle<()>>) -> Self { Self { rx, cancel, worker } }
+
     pub fn cancel(&self) { self.cancel.store(true, Ordering::Relaxed); }
 
     pub fn cancel_flag(&self) -> Arc<AtomicBool> { self.cancel.clone() }
@@ -136,34 +138,6 @@ impl<T> Iterator for StreamIter<T> {
 }
 
 impl<T> Drop for StreamIter<T> { fn drop(&mut self) { self.cancel(); } }
-
-#[cfg(test)]
-mod close_tests {
-    use super::*;
-    use std::thread;
-
-    #[test]
-    fn cancel_and_join_drains_full_channel_and_waits_for_worker() {
-        let (tx, rx) = mpsc::sync_channel(1);
-        let (started, ready) = mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let worker_cancel = cancel.clone();
-        let done = Arc::new(AtomicBool::new(false));
-        let worker_done = done.clone();
-        let worker = thread::spawn(move || {
-            tx.send(Ok(1)).unwrap();
-            started.send(()).unwrap();
-            // This blocks while the channel is full; close must drain, not just join.
-            tx.send(Ok(2)).unwrap();
-            assert!(worker_cancel.load(Ordering::Acquire));
-            worker_done.store(true, Ordering::Release);
-        });
-        ready.recv().unwrap();
-        StreamIter { rx, cancel: cancel.clone(), worker: Some(worker) }.cancel_and_join().unwrap();
-        assert!(cancel.load(Ordering::Acquire));
-        assert!(done.load(Ordering::Acquire));
-    }
-}
 
 pub(crate) fn spawn_walk<T, F>(roots: Vec<PathBuf>, base: PathBuf, walk: &WalkOptions, filters: Arc<PathFilters>, ready: Vec<T>, entry: F) -> StreamIter<T>
 where T: Send + 'static, F: Fn(Result<DirEntry, ignore::Error>, &Path, &PathFilters, &SyncSender<Result<T, RgApiError>>, &Arc<AtomicBool>) -> WalkState + Send
@@ -357,50 +331,3 @@ fn add_glob(builder: &mut GlobSetBuilder, glob: &str) -> Result<(), RgApiError> 
 fn build_path_re(pattern: Option<&str>) -> Result<Option<RegexMatcher>, RgApiError> { pattern.map(|pattern| RegexMatcher::path(pattern, false)).transpose() }
 
 fn re_match(matcher: &RegexMatcher, rel: &str) -> Result<bool, RgApiError> { matcher.is_match(rel.as_bytes()).map_err(|e| RgApiError::new(e.to_string())) }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::thread;
-    use std::time::Duration;
-
-    #[test]
-    fn globs_match_names_or_root_relative_components() {
-        for (glob, yes, no) in [
-            ("*.py", "src/deep/app.py", "src/app.rs"), ("src/*", "src/app.py", "src/deep/app.py"), ("src/**", "src/deep/app.py", "other/src/app.py"),
-            ("tests", "src/tests", "src/tests/app.py"),
-        ] {
-            let globs = build_globs(&[glob.into()]).unwrap().unwrap();
-            assert!(globs.is_match(yes), "{glob}: {yes}");
-            assert!(!globs.is_match(no), "{glob}: {no}");
-        }
-    }
-
-    fn iter_of(items: Vec<u32>, delay_ms: u64) -> StreamIter<u32> {
-        let (tx, rx) = mpsc::channel();
-        let cancel = Arc::new(AtomicBool::new(false));
-        let worker = thread::spawn(move || {
-            for i in items { thread::sleep(Duration::from_millis(delay_ms)); if tx.send(Ok(i)).is_err() { return; } }
-        });
-        StreamIter { rx, cancel, worker: Some(worker) }
-    }
-
-    #[test]
-    fn collect_timeout_honors_deadline() {
-        let (got, timed_out) = iter_of(vec![1, 2, 3], 0).collect_timeout(None).unwrap();
-        assert_eq!(got, vec![1, 2, 3]);
-        assert!(!timed_out);
-
-        let (got, timed_out) = iter_of(vec![1, 2, 3], 0).collect_timeout(Some(60_000)).unwrap();
-        assert_eq!(got, vec![1, 2, 3]);
-        assert!(!timed_out);
-
-        let (got, timed_out) = iter_of(vec![1, 2, 3], 50).collect_timeout(Some(0)).unwrap();
-        assert!(got.is_empty());
-        assert!(timed_out);
-
-        let (got, timed_out) = iter_of(vec![1, 2, 3], 200).collect_timeout(Some(20)).unwrap();
-        assert!(got.is_empty());
-        assert!(timed_out);
-    }
-}
