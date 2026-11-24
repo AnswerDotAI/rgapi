@@ -17,7 +17,8 @@ classifiers = [
 dependencies = ["fastcore>=2.2.29"]
 
 [project.optional-dependencies]
-dev = ["fastws-cli>=0.0.20", "fastship>=0.0.12", "maturin>=1.0,<2.0", "pytest"]
+test = ["pytest"]
+dev = ["fastws-cli>=0.0.20", "fastship>=0.0.12", "maturin>=1.0,<2.0", "rgapi[test]"]
 
 [project.urls]
 Homepage = "https://github.com/AnswerDotAI/rgapi"
