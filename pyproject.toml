@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.9.2,<2.0", "fastws-cli>=0.0.25"]
+requires = ["maturin>=1.9.2,<2.0", "fastws-cli>=0.0.42"]
 build-backend = "fastws.build_backend"
 
 [project]
@@ -17,8 +17,8 @@ classifiers = [
 dependencies = ["fastcore>=2.2.29"]
 
 [project.optional-dependencies]
-test = ["pytest"]
-dev = ["fastws-cli>=0.0.20", "fastship>=0.0.12", "maturin>=1.0,<2.0", "rgapi[test]"]
+test = ["fastws-cli>=0.0.42", "pytest"]
+dev = ["fastship>=0.0.12", "maturin>=1.0,<2.0", "rgapi[test]"]
 
 [project.urls]
 Homepage = "https://github.com/AnswerDotAI/rgapi"
